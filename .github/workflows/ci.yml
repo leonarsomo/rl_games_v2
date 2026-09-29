@@ -1,31 +1,55 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  lint:
+  quality:
+    name: Lint, format & types
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
 
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Lint
-        run: uv run ruff check .
+  test:
+    name: Tests (${{ matrix.os }})
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Unit tests
+        run: uv run pytest -m "not slow" --cov --cov-report=term-missing
+      - name: Learning checks (agents must actually learn CartPole)
+        if: matrix.os == 'ubuntu-latest'
+        run: uv run pytest -m slow
 
   build:
+    needs: test
     runs-on: ubuntu-latest
-    needs: lint
-
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Build package
-        run: uv build
+      - run: uv build

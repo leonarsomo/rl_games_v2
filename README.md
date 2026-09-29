@@ -1,296 +1,154 @@
-![CI](https://github.com/emiliomunozai/rl_games/actions/workflows/ci.yml/badge.svg?branch=main)
+# rl_games · edición mejorada
 
-A hands-on repo for understanding how Reinforcement Learning works.
-Train, inspect, and visualise RL agents on [LunarLander-v3](https://gymnasium.farama.org/environments/box2d/lunar_lander/) (or any other Gymnasium environment).
+[![CI](https://github.com/leonarsomo/rl_games_mejorado/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leonarsomo/rl_games_mejorado/actions/workflows/ci.yml)
+[![Simulador](https://img.shields.io/badge/simulador-HTML5-2a57d6)](https://leonarsomo.github.io/rl_games_mejorado/)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
+![Licencia Apache 2.0](https://img.shields.io/badge/licencia-Apache%202.0-lightgrey)
 
-**The learning algorithms are exercises.** The scaffolding around them -- CLI,
-persistence, environment handling, evaluation -- is complete and working, but
-the parts that actually learn raise `NotImplementedError` until you write them.
-See [Exercises](#exercises) below.
+Laboratorio de aprendizaje por refuerzo con **Q-Learning tabular** y **Deep Q-Network (DQN)** sobre [Gymnasium](https://gymnasium.farama.org/), más un **simulador HTML5** donde los mismos algoritmos entrenan en vivo en el navegador.
 
-## LunarLander-v3 environment
+Es un espejo mejorado de [emiliomunozai/rl_games](https://github.com/emiliomunozai/rl_games). El original deja los algoritmos como ejercicios; esta edición trae una implementación de referencia probada, corrige varios errores de fondo y añade herramientas para experimentar de forma reproducible. El detalle de cada cambio está en [REVISION.md](REVISION.md).
 
-The default environment is [LunarLander-v3](https://gymnasium.farama.org/environments/box2d/lunar_lander/).
-The lander starts at the top of the screen and the goal is to land it softly on the landing pad (between the two flags) using thrust and rotation.
+> Si estás resolviendo los ejercicios del curso, trabaja en el repositorio original. Usa este para comparar tu solución cuando termines.
 
-### State (observation) — 8 continuous values
+## Simulador en el navegador
 
-| Index | Variable | Description | Range |
-|:---:|---|---|---|
-| 0 | x | Horizontal position | -2.5 to 2.5 |
-| 1 | y | Vertical position | -2.5 to 2.5 |
-| 2 | vx | Horizontal velocity | -10 to 10 |
-| 3 | vy | Vertical velocity | -10 to 10 |
-| 4 | angle | Angle of the lander (radians) | -6.28 to 6.28 |
-| 5 | angular velocity | Rotation speed | -10 to 10 |
-| 6 | left leg contact | 1 if left leg touches ground, 0 otherwise | 0 or 1 |
-| 7 | right leg contact | 1 if right leg touches ground, 0 otherwise | 0 or 1 |
+**[leonarsomo.github.io/rl_games_mejorado](https://leonarsomo.github.io/rl_games_mejorado/)** (o abre `docs/index.html` localmente).
 
-### Actions — 4 discrete
+- **CartPole-v1** es un puerto exacto de la física de Gymnasium: la diferencia máxima entre ambas trayectorias es de 1e-7, la precisión de float32. Por eso una DQN entrenada en Python funciona en la página sin cambios; el modelo incluido obtiene 500/500 en ambos lados.
+- **Lunar Lander** es una versión ligera con la misma observación de 8 valores y la misma recompensa que `LunarLander-v3`, pero con física de cuerpo rígido simplificada en lugar de Box2D. El controlador heurístico oficial de Gymnasium, trasladado sin cambios, aterriza en 20 de 20 intentos.
+- DQN (Double DQN, Huber, recorte de gradiente, red objetivo) y Q-Learning escritos en JavaScript puro, sin dependencias.
+- Modos: entrenar (tiempo real, ×10 o turbo), ver la política codiciosa y pilotear con el teclado.
+- Muestra en vivo la curva de aprendizaje, los valores Q(s,a) del estado actual y el vector de observación.
 
-| Value | Action |
-|:---:|---|
-| 0 | Do nothing |
-| 1 | Fire left orientation engine (rotate right) |
-| 2 | Fire main engine (thrust up) |
-| 3 | Fire right orientation engine (rotate left) |
+## Instalación
 
-### Rewards
+Requiere [uv](https://docs.astral.sh/uv/) y Python 3.11.
 
-| Event | Reward |
+```bash
+git clone https://github.com/leonarsomo/rl_games_mejorado.git
+cd rl_games_mejorado
+uv sync --all-extras        # dependencias + matplotlib para las gráficas
+source .venv/bin/activate   # macOS / Linux  (Windows: .venv\Scripts\activate)
+```
+
+En Linux y Windows se instala PyTorch para CPU (≈ 1 GB en lugar de ≈ 7 GB con CUDA).
+
+## Uso rápido
+
+```bash
+rlgames inspect --env CartPole-v1                     # espacios y transiciones de ejemplo
+rlgames train dqn --env CartPole-v1 --episodes 500 --seed 7 --eval-every 20
+rlgames load  dqn --env CartPole-v1 --best --eval     # evalúa el mejor punto de control
+rlgames plot  dqn --env CartPole-v1                   # saves/dqn_CartPole-v1.png
+rlgames export dqn --env CartPole-v1 --best           # docs/models/dqn_CartPole-v1.json
+rlgames render dqn --env CartPole-v1 --best           # ventana gráfica
+```
+
+| Comando | Qué hace |
 |---|---|
-| Moving towards the landing pad | positive, proportional to distance reduction |
-| Moving away from the landing pad | negative |
-| Crash | **-100** |
-| Successful landing (come to rest) | **+100** |
-| Each leg ground contact | **+10** |
-| Firing main engine (per frame) | **-0.3** |
-| Firing side engine (per frame) | **-0.03** |
+| `inspect` | Muestra los espacios de observación y acción y transiciones aleatorias |
+| `init` | Crea un agente sin entrenar |
+| `train` | Entrena, o reanuda si ya existe un guardado, y añade el registro CSV |
+| `load` | Muestra la configuración; con `--eval`, evalúa la política codiciosa |
+| `sim` / `render` | Ejecuta episodios en texto o en ventana |
+| `plot` | Curva de aprendizaje (PNG) a partir del CSV |
+| `export` | Pesos de la DQN en JSON para el simulador |
+| `list` / `delete` / `version` | Utilidades |
 
-An episode is considered **solved** at **+200** points average over 100 episodes.
-The episode ends when the lander crashes, lands, or after **1000 time steps** (truncation).
-
-> Run `rlgames inspect` to see live state/action/reward values from the environment.
-
-## Quick concepts — Q-Learning methods
-
-### The core idea
-
-An RL agent interacts with an **environment** in discrete time steps.
-At each step it observes a **state** $s$, picks an **action** $a$, receives a **reward** $r$, and transitions to a new state $s'$.
-The goal is to learn a **policy** $\pi(s) \to a$ that maximises the total (discounted) reward over time.
-
-### Q-values and the Bellman equation
-
-A **Q-value** $Q(s, a)$ estimates the expected cumulative reward of taking action $a$ in state $s$ and then following the optimal policy.
-The optimal Q-values satisfy the **Bellman optimality equation**:
-
-$$
-Q^*(s, a) = r + \gamma \max_{a'} Q^*(s', a')
-$$
-
-where $\gamma \in [0, 1]$ is the **discount factor** (how much the agent cares about future vs. immediate rewards).
-
-### Tabular Q-Learning
-
-When the state and action spaces are small (or can be discretized), we store Q-values in a table and update them after every transition:
-
-$$
-Q(s, a) \leftarrow Q(s, a) + \alpha \bigl[ r + \gamma \max_{a'} Q(s', a') - Q(s, a) \bigr]
-$$
-
-- $\alpha$ (learning rate) — how fast we update.
-- **$\varepsilon$-greedy** exploration — with probability $\varepsilon$ pick a random action, otherwise pick $\arg\max_a Q(s, a)$. $\varepsilon$ decays over time so the agent gradually shifts from exploring to exploiting.
-
-> `src/rl_games/agents/qlearning.py` holds the tabular agent. The discretisation, policy and TD update are exercises.
-
-### Deep Q-Network (DQN)
-
-When the state space is continuous (like the 8-dimensional LunarLander observation), a table no longer works.
-**DQN** replaces the table with a neural network $Q_\theta(s, a)$ and introduces two key tricks:
-
-| Trick | Why |
-|---|---|
-| **Experience replay** | Store transitions in a buffer, sample random mini-batches — breaks correlation between consecutive samples and reuses data. |
-| **Target network** | Keep a frozen copy of the Q-network and update it periodically — stabilises the moving Bellman target. |
-
-Training step (one gradient update):
-
-1. Sample a mini-batch $\{(s, a, r, s', \text{done})\}$ from the replay buffer.
-2. Compute targets: $y = r + \gamma \cdot \max_{a'} Q_{\text{target}}(s', a') \cdot (1 - \text{done})$.
-3. Minimise MSE between $Q_\theta(s, a)$ and $y$.
-
-> `src/rl_games/agents/dqn.py` holds the from-scratch PyTorch agent. The replay buffer and training loop are complete; the network and the gradient step are exercises.
-
-### Exploration vs. Exploitation
-
-This is the fundamental trade-off in RL.
-**Explore** (random actions) to discover new, potentially better strategies.
-**Exploit** (greedy actions) to collect the highest reward based on current knowledge.
-The $\varepsilon$-greedy schedule balances both: start with high $\varepsilon$ (mostly exploring) and anneal towards low $\varepsilon$ (mostly exploiting).
-
-## Agents
-
-| Agent | Algorithm | State representation | File |
-|---|---|---|---|
-| `qlearning` | Tabular Q-Learning | Discretized (`n_bins=10` per continuous dim) | `agents/qlearning.py` |
-| `dqn` | DQN from scratch (PyTorch) | Raw continuous | `agents/dqn.py` |
-
-Both share `agents/base.py`, which holds the hyperparameters, the
-epsilon-greedy schedule and `predict()`. Each implements its own `train()`.
-
-## Setup
+Opciones comunes: `--env`, `--seed`, `--hp clave=valor` (repetible) y `--best`.
 
 ```bash
-uv sync
-source .venv/bin/activate   # Linux / macOS
-.venv\Scripts\activate      # Windows
+# Comparar DQN simple contra Double DQN con la misma semilla
+rlgames train dqn --env CartPole-v1 --seed 1 --hp double_dqn=false
+rlgames delete dqn --env CartPole-v1
+rlgames train dqn --env CartPole-v1 --seed 1 --hp double_dqn=true
 ```
 
-## CLI usage
+Las claves válidas de `--hp` son los campos de `QLearningConfig` y `DQNConfig` en [`src/rl_games/config.py`](src/rl_games/config.py). Una clave desconocida detiene la ejecución con la lista de claves válidas.
 
-```bash
-rlgames <command> [agent] [options]
+## Como librería
+
+```python
+from rl_games import evaluate, registry
+
+agent = registry.create("dqn", "CartPole-v1", {"lr": 1e-3}, seed=0)
+log = agent.train(300, eval_every=50)
+print(log.mean_reward(100))
+print(evaluate.summarize(evaluate.run_episodes(agent, n_episodes=20, seed=1000)))
 ```
 
-### Version
-
-```bash
-rlgames version
-```
-
-### List agents and their save status
-
-```bash
-rlgames list
-```
-
-### Inspect an environment
-
-Show state/action spaces and sample a few random transitions to see what the agent observes.
-
-```bash
-rlgames inspect                          # LunarLander-v3 (default)
-rlgames inspect --steps 10               # more sample transitions
-rlgames inspect --env CartPole-v1        # any Gymnasium env
-```
-
-### Initialize a new untrained agent
-
-```bash
-rlgames init qlearning
-rlgames init dqn
-```
-
-### Train an agent
-
-Creates a save if none exists, resumes from an existing save otherwise.
-
-```bash
-rlgames train qlearning --episodes 20000
-rlgames train dqn       --episodes 500
-```
-
-### Load a save and display info
-
-```bash
-rlgames load qlearning
-rlgames load dqn --eval
-```
-
-### Simulate episodes (text output)
-
-Run a trained agent and see every action, reward, and outcome in the terminal.
-
-```bash
-rlgames sim qlearning --episodes 3              # full episodes
-rlgames sim dqn       --episodes 2 --verbose    # full episodes with state vectors
-rlgames sim dqn       --episodes 5 --steps 10   # only first 10 steps per episode
-```
-
-### Render episodes (graphical window)
-
-```bash
-rlgames render qlearning --episodes 3
-rlgames render dqn       --episodes 3
-```
-
-### Delete a saved agent
-
-```bash
-rlgames delete qlearning
-rlgames delete dqn
-```
-
-## Project structure
+## Estructura
 
 ```
 src/rl_games/
-├── cli.py                  # argument parsing and output formatting only
-├── registry.py             # which agents exist, where they are saved
-├── evaluate.py             # run an agent greedily, without learning
-├── envs.py                 # env construction and observation bounds
+├── cli.py            # argumentos y salida; sin lógica de aprendizaje
+├── config.py         # QLearningConfig, DQNConfig, presets por entorno, --hp
+├── registry.py       # agentes registrados, rutas de guardado, carga/creación
+├── envs.py           # creación de entornos (con semilla) y límites de observación
+├── evaluate.py       # evaluación codiciosa reproducible
+├── metrics.py        # registro por episodio, CSV y media móvil
+├── utils.py          # semillas globales
 └── agents/
-    ├── base.py             # shared hyperparameters, epsilon schedule, predict()
-    ├── qlearning.py        # Tabular Q-Learning agent
-    └── dqn.py              # DQN agent from scratch (PyTorch)
+    ├── base.py       # bucle de entrenamiento único, ε-greedy, persistencia
+    ├── qlearning.py  # Q-Learning tabular (guardado .npz, sin pickle)
+    ├── dqn.py        # DQN: Double DQN, Huber, recorte, red objetivo por pasos
+    └── replay.py     # buffer de repetición con arreglos NumPy
+docs/
+├── index.html        # simulador HTML5 (GitHub Pages)
+└── models/           # modelo DQN de CartPole exportado desde Python
+tests/                # pytest: unidades, CLI y pruebas de aprendizaje
 ```
 
-Saves are written to `saves/` in the working directory, one file per
-(agent, environment) pair — e.g. `saves/qlearning_LunarLander-v3.pkl`.
+## Conceptos clave
 
-## Using it as a library
+**Q-Learning** (Watkins & Dayan, 1992) actualiza una tabla indexada por el estado discretizado:
 
-The CLI is a thin wrapper, so everything is reachable from Python:
+$$Q(s,a) \leftarrow Q(s,a) + \alpha\,\bigl[r + \gamma \max_{a'} Q(s',a')\,(1-\text{terminated}) - Q(s,a)\bigr]$$
 
-```python
-from rl_games import registry, evaluate, envs
+**DQN** (Mnih et al., 2015) reemplaza la tabla por una red neuronal y la estabiliza con un buffer de repetición y una red objetivo. Esta edición usa **Double DQN** (van Hasselt et al., 2016): la red en línea elige la acción siguiente y la red objetivo la evalúa, lo que reduce la sobreestimación.
 
-agent = registry.load_or_create("qlearning", "CartPole-v1")
-agent.train(total_episodes=2000)
+$$y = r + \gamma\, Q_{\text{obj}}\!\bigl(s',\, \arg\max_{a'} Q_{\theta}(s',a')\bigr)\,(1-\text{terminated})$$
 
-env = envs.make("CartPole-v1")
-print(evaluate.run_episodes(agent, env, n_episodes=10))
-env.close()
-```
+**Terminado frente a truncado.** Gymnasium distingue `terminated` (el episodio terminó de verdad: choque, aterrizaje, caída del poste) de `truncated` (se acabó el tiempo). Solo el primero anula el valor futuro. Tratar el límite de tiempo como estado terminal sesga el aprendizaje (Pardo et al., 2018), y era el error principal del proyecto original.
 
-## Choosing an environment
+## Resultados verificados
 
-Every command takes `--env`, defaulting to `LunarLander-v3`:
+Resultados obtenidos al construir esta edición (CPU, Python 3.11):
+
+| Agente | Entorno | Entrenamiento | Evaluación codiciosa |
+|---|---|---|---|
+| Q-Learning | CartPole-v1 | 3000 episodios, semilla 0 (15 s) | 139,9 ± 41,4 en 20 episodios |
+| DQN | CartPole-v1 | 500 episodios, semilla 7, mejor punto de control | **500,0 ± 0,0** en 30 episodios |
+| DQN (navegador) | Lunar Lander (ligero) | ≈ 45 000 pasos, 90 s en Chromium | media móvil de 50 episodios ≈ 220 |
+
+Una política aleatoria obtiene unos 22 puntos en CartPole. La discretización limita al Q-Learning tabular; ese es el motivo para pasar a la DQN.
+
+## Calidad
 
 ```bash
-rlgames train qlearning --env CartPole-v1 --episodes 5000
-rlgames train dqn       --env Acrobot-v1  --episodes 500
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pytest                 # todas (≈ 35 s)
+uv run pytest -m "not slow"   # solo unidades (≈ 3 s)
 ```
 
-Most Gymnasium environments with a **discrete action space** work with no
-extra code: the action count and observation shape are read from the
-environment itself.
+La CI de GitHub Actions ejecuta lint, formato, tipos y pruebas en Ubuntu y macOS, y el flujo `pages.yml` publica `docs/` en GitHub Pages.
 
-The one exception is tabular Q-learning on an environment that reports an
-**unbounded** observation space. Bin edges cannot be placed between `-inf`
-and `+inf`, so those environments need practical ranges added to `OBS_BOUNDS`
-in `src/rl_games/envs.py`:
+## Créditos y licencia
 
-```python
-OBS_BOUNDS: dict[str, tuple[np.ndarray, int]] = {
-    "LunarLander-v3": (np.array([[-1.5, 1.5], ...]), 2),
-    #                  ^ [low, high] per continuous dim       ^ trailing
-    #                                                           binary dims
-}
-```
+Proyecto original: [emiliomunozai/rl_games](https://github.com/emiliomunozai/rl_games), cuyo historial se conserva aquí. Edición mejorada: Leonar Socarrás Molina. Licencia Apache 2.0; ver [LICENSE](LICENSE) y [NOTICE](NOTICE).
 
-Run `rlgames list` to see which environments have entries. DQN never needs
-them.
+## Referencias
 
-## Exercises
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness, J., Bellemare, M. G., Graves, A., Riedmiller, M., Fidjeland, A. K., Ostrovski, G., Petersen, S., Beattie, C., Sadik, A., Antonoglou, I., King, H., Kumaran, D., Wierstra, D., Legg, S., & Hassabis, D. (2015). Human-level control through deep reinforcement learning. *Nature, 518*(7540), 529-533. https://doi.org/10.1038/nature14236
 
-These raise `NotImplementedError` until you implement them:
+Pardo, F., Tavakoli, A., Levdik, V., & Kormushev, P. (2018). Time limits in reinforcement learning. En *Proceedings of the 35th International Conference on Machine Learning* (Vol. 80, pp. 4045-4054). PMLR.
 
-| # | Where | What |
-|:---:|---|---|
-| 1 | `agents/dqn.py` → `QNetwork.__init__` | Build the fully-connected layers |
-| 2 | `agents/dqn.py` → `QNetwork.forward` | Run a batch of states through them |
-| 3 | `agents/dqn.py` → `DQNAgent.select_action` | Epsilon-greedy over the network |
-| 4 | `agents/dqn.py` → `DQNAgent._learn` | One Bellman gradient step |
-| 5 | `agents/qlearning.py` → `discretize` | Continuous observation → table key |
-| 6 | `agents/qlearning.py` → `select_action` | Epsilon-greedy over the Q-table |
-| 7 | `agents/qlearning.py` → `_update` | The temporal-difference update |
+Sutton, R. S., & Barto, A. G. (2018). *Reinforcement learning: An introduction* (2.ª ed.). MIT Press.
 
-Each stub carries a comment describing what it needs to do and which
-attributes are already available. Suggested order: 5 → 6 → 7 (tabular
-Q-learning end to end), then 1 → 2 → 3 → 4 (DQN).
+Towers, M., Kwiatkowski, A., Terry, J., Balis, J. U., De Cola, G., Deleu, T., Goulão, M., Kallinteris, A., Krimmel, M., KG, A., Perez-Vicente, R., Pierré, A., Schulhoff, S., Tai, J. J., Tan, H., & Younis, O. G. (2024). *Gymnasium: A standard interface for reinforcement learning environments* (arXiv:2407.17032). arXiv. https://doi.org/10.48550/arXiv.2407.17032
 
-Check your progress with:
+van Hasselt, H., Guez, A., & Silver, D. (2016). Deep reinforcement learning with double Q-learning. *Proceedings of the AAAI Conference on Artificial Intelligence, 30*(1). https://doi.org/10.1609/aaai.v30i1.10295
 
-```bash
-rlgames train qlearning --env CartPole-v1 --episodes 2000
-rlgames load qlearning --env CartPole-v1 --eval
-```
-
-CartPole is the better signal than LunarLander — discretisation costs a
-tabular agent most of the LunarLander state, so a mediocre score there does
-not mean your code is wrong.
-
-Reference solutions live in `CHEATSHEET.md`, which is gitignored: it is in
-your working copy but never committed.
+Watkins, C. J. C. H., & Dayan, P. (1992). Q-learning. *Machine Learning, 8*(3-4), 279-292. https://doi.org/10.1007/BF00992698

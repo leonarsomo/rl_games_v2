@@ -1,201 +1,121 @@
 """Tabular Q-learning over a discretised observation space.
 
 Contents:
-  - QLearningAgent : observation discretisation, epsilon-greedy policy,
-                     temporal-difference update, training loop, and save/load
+  - QLearningAgent : discretisation, greedy lookup, TD(0) update,
+                     per-episode ε decay, and a pickle-free save format.
 
-The discretisation, policy and update are exercises; see CHEATSHEET.md.
+Update rule (Watkins & Dayan, 1992):
+
+    Q(s,a) ← Q(s,a) + α [ r + γ · max_a' Q(s',a') · (1 − terminated) − Q(s,a) ]
 """
-import pickle
+
+from __future__ import annotations
+
+import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import numpy as np
 
 from rl_games import envs
 from rl_games.agents.base import BaseAgent
+from rl_games.config import QLearningConfig, from_dict
+
+State = tuple[int, ...]
 
 
-class QLearningAgent(BaseAgent):
+class QLearningAgent(BaseAgent[State, QLearningConfig]):
     """Tabular Q-learning over a discretised observation space."""
 
+    agent_type = "qlearning"
     label = "Q-Learning"
+
     def __init__(
-        self,
-        env_id: str,
-        *,
-        n_bins: int = 10,
-        lr: float = 0.1,
-        gamma: float = 0.99,
-        epsilon_start: float = 1.0,
-        epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.9995,
+        self, env_id: str, config: QLearningConfig | None = None, *, seed: int | None = None
     ) -> None:
-        super().__init__(
-            env_id,
-            lr=lr,
-            gamma=gamma,
-            epsilon_start=epsilon_start,
-            epsilon_end=epsilon_end,
-            epsilon_decay=epsilon_decay,
-        )
-        self.n_bins = n_bins
+        super().__init__(env_id, config or QLearningConfig(), seed=seed)
+        self.q_table: defaultdict[State, np.ndarray] = self._empty_table()
 
-        # Ask the env itself for the action count, and for the bounds unless
-        # it reports an unbounded observation space.
-        env = envs.make(env_id)
-        try:
-            self.n_actions = int(env.action_space.n)  # type: ignore[attr-defined]
-            self._bounds, self._n_binary_dims = envs.bounds_for(env_id, env)
-        finally:
-            env.close()
+    def _setup(self, env: Any) -> None:
+        self._bounds, self._n_binary_dims = envs.bounds_for(self.env_id, env)
+        self._low = self._bounds[:, 0]
+        self._high = self._bounds[:, 1]
+        # n_bins intervals need n_bins - 1 *interior* edges.
+        self._edges = [np.linspace(lo, hi, self.config.n_bins + 1)[1:-1] for lo, hi in self._bounds]
+        self._n_continuous = len(self._bounds)
 
-        self._bins = [
-            np.linspace(lo, hi, n_bins + 1)[1:-1] for lo, hi in self._bounds
-        ]
-        self.q_table: dict[tuple, np.ndarray] = defaultdict(
-            lambda: np.zeros(self.n_actions)
-        )
+    def _empty_table(self) -> defaultdict[State, np.ndarray]:
+        n = self.n_actions
+        return defaultdict(lambda: np.zeros(n))
 
-    # ------------------------------------------------------------------
-    # helpers
-    # ------------------------------------------------------------------
+    # ── state representation ───────────────────────────────────────────
 
-    def discretize(self, obs: np.ndarray) -> tuple:
+    def discretize(self, obs: np.ndarray) -> State:
         """Map a continuous observation to a hashable tuple of bin indices.
 
-        The result is used directly as a q_table key, so it must be a tuple
-        of ints, one per observation dimension.
+        Values outside [low, high] are clipped so they land in the edge bins
+        instead of creating unbounded new keys.
         """
-        # EXERCISE: bin the observation.
-        #   - self._bounds holds [low, high] for the leading continuous dims,
-        #     self._bins holds the bin edges for each of them
-        #   - clip before binning so out-of-range values land in the end bins
-        #     instead of creating new ones (np.clip, np.digitize)
-        #   - the final self._n_binary_dims dims are already 0/1: use as-is
-        raise NotImplementedError("QLearningAgent.discretize -- see CHEATSHEET.md")
+        obs = np.asarray(obs, dtype=float)
+        cont = np.clip(obs[: self._n_continuous], self._low, self._high)
+        bins = [int(np.digitize(v, edges)) for v, edges in zip(cont, self._edges, strict=True)]
+        flags = [round(float(v)) for v in obs[self._n_continuous :]]
+        return tuple(bins + flags)
 
-    def select_action(self, state: tuple, *, deterministic: bool = False) -> int:
-        """Epsilon-greedy action for an already-discretised `state`."""
-        # EXERCISE: with probability self.epsilon return a random action out of
-        # self.n_actions (unless `deterministic`), otherwise the argmax of this
-        # state's row in self.q_table.
-        raise NotImplementedError("QLearningAgent.select_action -- see CHEATSHEET.md")
-
-    def _to_state(self, obs: np.ndarray) -> tuple:
+    def _to_state(self, obs: np.ndarray) -> State:
         return self.discretize(obs)
 
-    # ------------------------------------------------------------------
-    # core RL
-    # ------------------------------------------------------------------
+    # ── policy & learning ──────────────────────────────────────────────
 
-    def _update(
-        self,
-        state: tuple,
-        action: int,
-        reward: float,
-        next_state: tuple,
-        done: bool,
-    ) -> None:
-        """Apply one temporal-difference update to Q(state, action)."""
-        # EXERCISE: the heart of Q-learning.
-        #   target = reward + gamma * max_a' Q(next_state, a')
-        #   error  = target - Q(state, action)
-        #   Q(state, action) += lr * error
-        # On a terminal state (done) there is no future reward, so the
-        # max term must be 0 rather than the table's value for next_state.
-        raise NotImplementedError("QLearningAgent._update -- see CHEATSHEET.md")
+    def _greedy_action(self, state: State) -> int:
+        q = self.q_table[state]
+        # Break ties randomly: with an all-zero row np.argmax would always
+        # return action 0, biasing early behaviour.
+        best = np.flatnonzero(q == q.max())
+        return int(best[0] if best.size == 1 else self.rng.choice(best))
 
-    def train(self, total_episodes: int = 10_000, log_interval: int = 100) -> list[float]:
-        env = envs.make(self.env_id)
-        rewards_history: list[float] = []
+    def _observe(
+        self, state: State, action: int, reward: float, next_state: State, terminated: bool
+    ) -> float:
+        future = 0.0 if terminated else float(np.max(self.q_table[next_state]))
+        target = reward + self.config.gamma * future
+        td_error = target - self.q_table[state][action]
+        self.q_table[state][action] += self.config.lr * td_error
+        return float(td_error**2)  # reported as "loss" for comparability with DQN
 
-        for episode in range(1, total_episodes + 1):
-            obs, _ = env.reset()
-            state = self.discretize(obs)
-            total_reward = 0.0
-            done = False
+    def _on_episode_end(self) -> None:
+        self.epsilon = max(self.config.epsilon_end, self.epsilon * self.config.epsilon_decay)
 
-            # Environment loop
-            while not done:
-                # Select action
-                action = self.select_action(state)
-                # Take action
-                next_obs, reward, terminated, truncated, _ = env.step(action)
-                # Update done flag
-                done = terminated or truncated
-                # Update state
-                next_state = self.discretize(next_obs)
-                # Update Q-table
-                self._update(state, action, reward, next_state, done)
-                # Update state
-                state = next_state
-                # Update total reward
-                total_reward += reward
-
-            self._decay_epsilon()
-            self.training_episodes += 1
-            rewards_history.append(total_reward)
-
-            if episode % log_interval == 0:
-                self._log_episode(
-                    episode,
-                    total_episodes,
-                    rewards_history,
-                    log_interval,
-                    f"States visited: {len(self.q_table)}",
-                )
-
-        env.close()
-        return rewards_history
-
-    # ------------------------------------------------------------------
-    # persistence
-    # ------------------------------------------------------------------
+    # ── persistence (npz + JSON header, no pickle) ─────────────────────
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "q_table": dict(self.q_table),
-            "epsilon": self.epsilon,
-            "training_episodes": self.training_episodes,
-            "env_id": self.env_id,
-            "n_bins": self.n_bins,
-            "lr": self.lr,
-            "gamma": self.gamma,
-            "epsilon_end": self.epsilon_end,
-            "epsilon_decay": self.epsilon_decay,
-        }
-        with open(path, "wb") as f:
-            pickle.dump(data, f)
+        keys = np.array(list(self.q_table.keys()), dtype=np.int32).reshape(len(self.q_table), -1)
+        values = (
+            np.stack(list(self.q_table.values())) if self.q_table else np.zeros((0, self.n_actions))
+        )
+        meta = json.dumps(self._common_state())
+        with path.open("wb") as f:
+            np.savez_compressed(f, keys=keys, values=values, meta=np.array(meta))
         print(f"Saved {self.label} agent to {path}")
 
     @classmethod
     def load(cls, path: Path) -> Self:
-        with open(path, "rb") as f:
-            data = pickle.load(f)  # noqa: S301
-
-        agent = cls(
-            env_id=data["env_id"],
-            n_bins=data["n_bins"],
-            lr=data["lr"],
-            gamma=data["gamma"],
-            epsilon_start=data["epsilon"],
-            epsilon_end=data["epsilon_end"],
-            epsilon_decay=data["epsilon_decay"],
-        )
-        agent.q_table = defaultdict(
-            lambda: np.zeros(agent.n_actions), data["q_table"]
-        )
-        agent.training_episodes = data["training_episodes"]
+        with np.load(path, allow_pickle=False) as data:
+            meta = json.loads(str(data["meta"]))
+            keys, values = data["keys"], data["values"]
+        cls._check_format(meta, path)
+        cfg = from_dict(cls.agent_type, meta["config"])
+        assert isinstance(cfg, QLearningConfig)
+        agent = cls(meta["env_id"], cfg, seed=meta.get("seed"))
+        agent._restore_common(meta)
+        for k, v in zip(keys, values, strict=True):
+            agent.q_table[tuple(int(x) for x in k)] = v.astype(float)
         return agent
 
-    def info(self) -> str:
-        return (
-            f"{self.label} agent for {self.env_id}\n"
-            f"  Episodes trained : {self.training_episodes}\n"
-            f"  States visited   : {len(self.q_table)}\n"
-            f"  Epsilon          : {self.epsilon:.4f}\n"
-            f"  LR / Gamma       : {self.lr} / {self.gamma}"
-        )
+    def _info_extra(self) -> list[str]:
+        return [f"  States visited   : {len(self.q_table)}"]
+
+    def _progress_extra(self) -> str:
+        return f" | States: {len(self.q_table)}"

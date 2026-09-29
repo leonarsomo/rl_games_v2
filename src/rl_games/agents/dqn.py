@@ -1,266 +1,217 @@
-"""Deep Q-Network (DQN) in PyTorch.
+"""Deep Q-Network (DQN) in PyTorch, with the standard stabilisers.
 
 Contents:
-  - QNetwork     : fully-connected network mapping state -> Q(s, a)
-  - ReplayBuffer : fixed-size FIFO buffer of (s, a, r, s', done) transitions
-  - DQNAgent     : epsilon-greedy policy, training loop, target-network sync,
-                   and save/load
+  - QNetwork : MLP mapping a state to one Q-value per action
+  - DQNAgent : ε-greedy policy (linear per-step schedule), replay buffer,
+               Double-DQN target, Huber loss, gradient clipping, step-based
+               target-network sync, and safe (weights_only) save/load.
 
-QNetwork and parts of DQNAgent are exercises; see CHEATSHEET.md.
+One gradient step, with Double DQN (van Hasselt et al., 2016):
+
+    a*  = argmax_a' Q_online(s', a')                  # online net selects
+    y   = r + γ · Q_target(s', a*) · (1 − terminated)  # target net evaluates
+    L   = Huber(Q_online(s, a), y)
+
+Plain DQN (Mnih et al., 2015) uses max_a' Q_target(s', a') instead, which
+systematically over-estimates Q-values; set `double_dqn=False` to compare.
 """
-import random
-from collections import deque
+
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
+from torch import nn
 
-from rl_games import envs
 from rl_games.agents.base import BaseAgent
-
-
-# ── Neural network ────────────────────────────────────────────────────
+from rl_games.agents.replay import ReplayBuffer
+from rl_games.config import DQNConfig, from_dict
 
 
 class QNetwork(nn.Module):
-    """Maps a state to one Q-value per action.
+    """Fully-connected state → Q(s, ·). No activation on the output: Q is unbounded."""
 
-    Two hidden layers is the standard baseline for LunarLander-sized
-    problems: enough capacity to matter, small enough to train on CPU.
-    """
-
-    def __init__(self, state_dim: int, action_dim: int, hidden: int = 128) -> None:
+    def __init__(self, state_dim: int, action_dim: int, hidden: tuple[int, ...] = (128, 128)):
         super().__init__()
-        # EXERCISE: build the network.
-        #   - input is `state_dim` wide, output is `action_dim` wide, because
-        #     the net returns one Q-value per action in a single forward pass
-        #   - `hidden` units in between, with a nonlinearity after each
-        #     hidden layer (without one you have a linear model)
-        #   - no activation on the output: Q-values are unbounded
-        raise NotImplementedError("QNetwork.__init__ -- see CHEATSHEET.md")
+        layers: list[nn.Module] = []
+        width = state_dim
+        for h in hidden:
+            layers += [nn.Linear(width, h), nn.ReLU()]
+            width = h
+        layers.append(nn.Linear(width, action_dim))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Q-values for a batch of states, shape (batch, action_dim)."""
-        # EXERCISE: run `x` through the layers defined in __init__.
-        raise NotImplementedError("QNetwork.forward -- see CHEATSHEET.md")
+        return self.net(x)
 
 
-# ── Replay buffer ────────────────────────────────────────────────────
+def pick_device() -> torch.device:
+    """CUDA if present; otherwise CPU. (For nets this small, MPS is slower.)"""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class ReplayBuffer:
-    """Fixed-size FIFO buffer that stores transitions for experience replay."""
+class DQNAgent(BaseAgent[np.ndarray, DQNConfig]):
+    agent_type = "dqn"
+    label = "DQN"
 
-    def __init__(self, capacity: int = 100_000) -> None:
-        self.buffer: deque[tuple] = deque(maxlen=capacity)
+    def __init__(
+        self, env_id: str, config: DQNConfig | None = None, *, seed: int | None = None
+    ) -> None:
+        super().__init__(env_id, config or DQNConfig(), seed=seed)
+        cfg = self.config
+        self.device = pick_device()
+        if seed is not None:
+            torch.manual_seed(seed)
 
-    def push(
+        self.q_net = QNetwork(self.state_dim, self.n_actions, cfg.hidden).to(self.device)
+        self.target_net = QNetwork(self.state_dim, self.n_actions, cfg.hidden).to(self.device)
+        self.target_net.load_state_dict(self.q_net.state_dict())
+        self.target_net.eval()  # never trained directly
+
+        self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=cfg.lr)
+        self.loss_fn: nn.Module = nn.SmoothL1Loss() if cfg.huber_loss else nn.MSELoss()
+        self.buffer = ReplayBuffer(cfg.buffer_capacity, self.state_dim, self.rng)
+
+    def _setup(self, env: Any) -> None:
+        shape = env.observation_space.shape
+        if shape is None or len(shape) != 1:
+            raise ValueError(f"DQN expects a flat vector observation, got shape {shape}")
+        self.state_dim = int(shape[0])
+
+    # ── policy ─────────────────────────────────────────────────────────
+
+    def _to_state(self, obs: np.ndarray) -> np.ndarray:
+        return np.asarray(obs, dtype=np.float32)
+
+    @torch.no_grad()
+    def q_values(self, state: np.ndarray) -> np.ndarray:
+        """Q(s, ·) for a single state -- handy for inspection and the web export."""
+        x = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        return self.q_net(x).squeeze(0).cpu().numpy()
+
+    def _greedy_action(self, state: np.ndarray) -> int:
+        return int(np.argmax(self.q_values(state)))
+
+    # ── learning ───────────────────────────────────────────────────────
+
+    def _observe(
         self,
         state: np.ndarray,
         action: int,
         reward: float,
         next_state: np.ndarray,
-        done: bool,
-    ) -> None:
-        self.buffer.append((state, action, reward, next_state, done))
-
-    def sample(self, batch_size: int) -> list[tuple]:
-        return random.sample(self.buffer, batch_size)
-
-    def __len__(self) -> int:
-        return len(self.buffer)
-
-
-# ── Agent ─────────────────────────────────────────────────────────────
-
-
-class DQNAgent(BaseAgent):
-    """
-    Deep Q-Network agent implemented from scratch.
-
-    Hyperparameters are intentionally exposed as constructor args so you
-    can experiment with them directly.
-    """
-
-    label = "DQN"
-
-    def __init__(
-        self,
-        env_id: str,
-        *,
-        lr: float = 1e-3,
-        gamma: float = 0.99,
-        epsilon_start: float = 1.0,
-        epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.995,
-        batch_size: int = 64,
-        buffer_capacity: int = 100_000,
-        target_update_freq: int = 10,
-        hidden: int = 128,
-    ) -> None:
-        super().__init__(
-            env_id,
-            lr=lr,
-            gamma=gamma,
-            epsilon_start=epsilon_start,
-            epsilon_end=epsilon_end,
-            epsilon_decay=epsilon_decay,
-        )
-        self.batch_size = batch_size
-        self.target_update_freq = target_update_freq
-
-        env = envs.make(env_id)
-        self.state_dim = env.observation_space.shape[0]
-        self.action_dim = int(env.action_space.n)  # type: ignore[attr-defined]
-        env.close()
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.q_net = QNetwork(self.state_dim, self.action_dim, hidden).to(self.device)
-        self.target_net = QNetwork(self.state_dim, self.action_dim, hidden).to(self.device)
-        self.target_net.load_state_dict(self.q_net.state_dict())
-
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
-        self.loss_fn = nn.MSELoss()
-        self.buffer = ReplayBuffer(buffer_capacity)
-
-    # ── policy ────────────────────────────────────────────────────────
-
-    def select_action(self, state: np.ndarray, *, deterministic: bool = False) -> int:
-        """Epsilon-greedy action for `state`.
-
-        With probability self.epsilon pick uniformly at random (unless
-        `deterministic`), otherwise pick argmax of the online network's
-        Q-values.
-        """
-        # EXERCISE: implement epsilon-greedy over self.q_net.
-        #   - wrap the forward pass in torch.no_grad(): this is inference, so
-        #     there is no need to build a graph
-        #   - the net expects a batch dimension, a single state does not have one
-        raise NotImplementedError("DQNAgent.select_action -- see CHEATSHEET.md")
-
-    # ── learning step ─────────────────────────────────────────────────
+        terminated: bool,
+    ) -> float | None:
+        self.buffer.push(state, action, reward, next_state, terminated)
+        cfg = self.config
+        ready = len(self.buffer) >= max(cfg.learning_starts, cfg.batch_size)
+        if ready and self.total_steps % cfg.train_freq == 0:
+            return self._learn()
+        return None
 
     def _learn(self) -> float:
-        """Sample a mini-batch from the buffer and perform one gradient step.
+        """Sample a mini-batch and perform one gradient step. Returns the loss."""
+        cfg = self.config
+        b = self.buffer.sample(cfg.batch_size)
+        dev = self.device
+        states = torch.as_tensor(b.states, device=dev)
+        actions = torch.as_tensor(b.actions, device=dev).unsqueeze(1)
+        rewards = torch.as_tensor(b.rewards, device=dev)
+        next_states = torch.as_tensor(b.next_states, device=dev)
+        terminated = torch.as_tensor(b.terminated, device=dev)
 
-        Returns the batch loss value, or 0.0 while the buffer is too small.
-        """
-        if len(self.buffer) < self.batch_size:
-            return 0.0
+        q_sa = self.q_net(states).gather(1, actions).squeeze(1)
 
-        # EXERCISE: one DQN gradient step.
-        #   1. sample a batch and turn each column into a tensor on self.device
-        #   2. current Q: self.q_net(states), keeping only the actions taken
-        #      (torch.gather does this)
-        #   3. target Q: r + gamma * max_a' Q_target(s', a') * (1 - done).
-        #      Use the TARGET network here, under torch.no_grad(), and note
-        #      the (1 - done) factor -- a terminal state has no future reward
-        #   4. self.loss_fn(current, target), then zero_grad / backward / step
-        #   5. return loss.item()
-        raise NotImplementedError("DQNAgent._learn -- see CHEATSHEET.md")
+        with torch.no_grad():
+            if cfg.double_dqn:
+                next_actions = self.q_net(next_states).argmax(dim=1, keepdim=True)
+                next_q = self.target_net(next_states).gather(1, next_actions).squeeze(1)
+            else:
+                next_q = self.target_net(next_states).max(dim=1).values
+            target = rewards + cfg.gamma * next_q * (1.0 - terminated)
 
-    # ── training loop ─────────────────────────────────────────────────
+        loss = self.loss_fn(q_sa, target)
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.q_net.parameters(), cfg.max_grad_norm)
+        self.optimizer.step()
+        return float(loss.item())
 
-    def train(self, total_episodes: int = 500, log_interval: int = 10) -> list[float]:
-        env = envs.make(self.env_id)
-        rewards_history: list[float] = []
+    def _on_step_end(self) -> None:
+        cfg = self.config
+        # Linear ε schedule over environment steps (as in the DQN paper).
+        frac = min(1.0, self.total_steps / cfg.epsilon_decay_steps)
+        self.epsilon = cfg.epsilon_start + frac * (cfg.epsilon_end - cfg.epsilon_start)
+        if self.total_steps % cfg.target_update_steps == 0:
+            self.target_net.load_state_dict(self.q_net.state_dict())
 
-        for episode in range(1, total_episodes + 1):
-            obs, _ = env.reset()
-            total_reward = 0.0
-            done = False
-
-            # Environment loop
-            while not done:
-                # Select action
-                action = self.select_action(obs)
-                # Take action
-                next_obs, reward, terminated, truncated, _ = env.step(action)
-                # Update state
-                done = terminated or truncated
-                # Update buffer
-                self.buffer.push(obs, action, float(reward), next_obs, done)
-                # Update Q-network
-                self._learn()
-                # Update state and total reward
-                obs = next_obs
-                total_reward += reward
-
-            self._decay_epsilon()
-            self.training_episodes += 1
-            rewards_history.append(total_reward)
-
-            if episode % self.target_update_freq == 0:
-                self.target_net.load_state_dict(self.q_net.state_dict())
-
-            if episode % log_interval == 0:
-                self._log_episode(
-                    episode,
-                    total_episodes,
-                    rewards_history,
-                    log_interval,
-                    f"Buffer: {len(self.buffer)}",
-                )
-
-        env.close()
-        return rewards_history
-
-    # ── persistence ───────────────────────────────────────────────────
+    # ── persistence ────────────────────────────────────────────────────
 
     def save(self, path: Path) -> None:
+        """Weights, optimizer and metadata. The replay buffer is not saved,
+        so a resumed run re-fills it (after `learning_starts` steps)."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "q_net_state": self.q_net.state_dict(),
-            "target_net_state": self.target_net.state_dict(),
-            "optimizer_state": self.optimizer.state_dict(),
-            "epsilon": self.epsilon,
-            "training_episodes": self.training_episodes,
-            "env_id": self.env_id,
-            "state_dim": self.state_dim,
-            "action_dim": self.action_dim,
-            "lr": self.lr,
-            "gamma": self.gamma,
-            "epsilon_start": self.epsilon_start,
-            "epsilon_end": self.epsilon_end,
-            "epsilon_decay": self.epsilon_decay,
-            "batch_size": self.batch_size,
-            "target_update_freq": self.target_update_freq,
-        }
+        data = self._common_state()
+        data["config"]["hidden"] = list(self.config.hidden)
+        data.update(
+            q_net_state=self.q_net.state_dict(),
+            target_net_state=self.target_net.state_dict(),
+            optimizer_state=self.optimizer.state_dict(),
+            state_dim=self.state_dim,
+            action_dim=self.n_actions,
+        )
         torch.save(data, path)
         print(f"Saved {self.label} agent to {path}")
 
     @classmethod
     def load(cls, path: Path) -> Self:
-        data = torch.load(path, weights_only=False)
-        agent = cls(
-            data["env_id"],
-            lr=data["lr"],
-            gamma=data["gamma"],
-            epsilon_start=data["epsilon"],
-            epsilon_end=data["epsilon_end"],
-            epsilon_decay=data["epsilon_decay"],
-            batch_size=data["batch_size"],
-            target_update_freq=data["target_update_freq"],
-        )
+        # weights_only=True refuses to unpickle arbitrary objects, so a
+        # downloaded .pt file cannot execute code on load.
+        data = torch.load(path, weights_only=True, map_location="cpu")
+        cls._check_format(data, path)
+        cfg = from_dict(cls.agent_type, data["config"])
+        assert isinstance(cfg, DQNConfig)
+        agent = cls(data["env_id"], cfg, seed=data.get("seed"))
+        agent._restore_common(data)
         agent.q_net.load_state_dict(data["q_net_state"])
         agent.target_net.load_state_dict(data["target_net_state"])
         agent.optimizer.load_state_dict(data["optimizer_state"])
-        agent.training_episodes = data["training_episodes"]
         return agent
 
-    def info(self) -> str:
+    def _info_extra(self) -> list[str]:
         params = sum(p.numel() for p in self.q_net.parameters())
-        return (
-            f"{self.label} agent for {self.env_id}\n"
-            f"  Episodes trained  : {self.training_episodes}\n"
-            f"  Network params    : {params:,}\n"
-            f"  Epsilon           : {self.epsilon:.4f}\n"
-            f"  LR / Gamma        : {self.lr} / {self.gamma}\n"
-            f"  Batch size        : {self.batch_size}\n"
-            f"  Target update     : every {self.target_update_freq} episodes\n"
-            f"  Device            : {self.device}"
-        )
+        return [
+            f"  Network params   : {params:,}",
+            f"  Device           : {self.device}",
+            f"  Replay buffer    : {len(self.buffer)}/{self.config.buffer_capacity}",
+        ]
+
+    def _progress_extra(self) -> str:
+        return f" | Buffer: {len(self.buffer)}"
+
+    # ── export for the HTML5 simulator ─────────────────────────────────
+
+    def export_json(self) -> dict[str, Any]:
+        """Plain-JSON weights (layer by layer) that docs/index.html can load."""
+        layers = []
+        for module in self.q_net.net:
+            if isinstance(module, nn.Linear):
+                layers.append(
+                    {
+                        "W": module.weight.detach().cpu().numpy().round(6).tolist(),
+                        "b": module.bias.detach().cpu().numpy().round(6).tolist(),
+                    }
+                )
+        return {
+            "format": "rl_games-dqn-mlp",
+            "version": 1,
+            "env_id": self.env_id,
+            "activation": "relu",
+            "state_dim": self.state_dim,
+            "action_dim": self.n_actions,
+            "training_episodes": self.training_episodes,
+            "layers": layers,
+        }

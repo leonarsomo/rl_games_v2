@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Laboratorio Lunar RL</title>
+<meta name="description" content="Simulador HTML5 de aprendizaje por refuerzo: CartPole y un módulo lunar entrenados en vivo con DQN y Q-Learning, sin dependencias.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: mission-control console. Stage (simulation) left, flight controls
+   right, learning curve as a full-width telemetry strip underneath. */
+:root {
+  --bg: #eceff4;
+  --panel: #ffffff;
+  --ink: #141a24;
+  --muted: #5a6475;
+  --line: #d3d9e3;
+  --accent: #2a57d6;
+  --accent-ink: #ffffff;
+  --warm: #b86a0c;
+  --good: #1b8052;
+  --bad: #bf3b34;
+  --sky-top: #cfd9ea;
+  --sky-bottom: #eef2f8;
+  --ground: #9aa5b8;
+  --ground-edge: #6d7a90;
+  --craft: #1d2533;
+  --soft: #f4f6f9;
+  --f-display: "Saira Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c1017; --panel: #141a24; --ink: #e5e9f0; --muted: #919db0; --line: #263041;
+    --accent: #7d9bff; --accent-ink: #0c1017; --warm: #f1a13b; --good: #49c287; --bad: #f06c64;
+    --sky-top: #05070c; --sky-bottom: #111827; --ground: #3a4456; --ground-edge: #5b6882;
+    --craft: #e9edf4; --soft: #1a2130; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1017; --panel: #141a24; --ink: #e5e9f0; --muted: #919db0; --line: #263041;
+  --accent: #7d9bff; --accent-ink: #0c1017; --warm: #f1a13b; --good: #49c287; --bad: #f06c64;
+  --sky-top: #05070c; --sky-bottom: #111827; --ground: #3a4456; --ground-edge: #5b6882;
+  --craft: #e9edf4; --soft: #1a2130; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.5 var(--f-body);
+  padding: 20px 16px 40px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 16px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: 0.01em; }
+h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); line-height: 1.05; }
+h2 { font-size: 1.15rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+p { margin: 0; }
+.eyebrow { font: 500 0.72rem/1 var(--f-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+
+/* ── header ─────────────────────────────────────────────── */
+.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px 24px; }
+.top .title { display: grid; gap: 6px; min-width: 0; }
+.top .lede { color: var(--muted); max-width: 62ch; }
+.pickers { display: flex; flex-wrap: wrap; gap: 12px; }
+.picker { display: grid; gap: 4px; }
+.picker > span { font: 500 0.7rem/1 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 3px; gap: 2px; }
+.seg button {
+  font: 500 0.88rem/1 var(--f-body); color: var(--muted); background: transparent;
+  border: 0; border-radius: 6px; padding: 8px 12px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:hover:not([aria-pressed="true"]) { color: var(--ink); background: var(--soft); }
+
+/* ── main console ───────────────────────────────────────── */
+.console { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .console { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); }
+.stage { overflow: hidden; }
+.stage canvas { display: block; width: 100%; aspect-ratio: 3 / 2; max-width: 100%; }
+.telemetry {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  border-top: 1px solid var(--line);
+}
+.telemetry div { padding: 8px 12px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-width: 0; }
+.telemetry dt { font: 500 0.68rem/1.2 var(--f-mono); color: var(--muted); letter-spacing: 0.04em; }
+.telemetry dd { margin: 2px 0 0; font: 500 0.95rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+
+.side { display: grid; gap: 16px; }
+.side .panel { padding: 16px; display: grid; gap: 14px; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn {
+  font: 600 0.92rem/1 var(--f-body); border-radius: 8px; padding: 11px 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--soft); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); grid-column: 1 / -1; font-size: 1rem; padding: 13px; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn:focus-visible, .seg button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.status { font: 500 0.8rem/1 var(--f-mono); display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+.status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.status[data-mode="train"] i { background: var(--warm); }
+.status[data-mode="watch"] i { background: var(--good); }
+.status[data-mode="manual"] i { background: var(--accent); }
+
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.stats div { background: var(--panel); padding: 9px 10px; min-width: 0; }
+.stats dt { font: 500 0.66rem/1.2 var(--f-mono); color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.stats dd { margin: 3px 0 0; font: 600 1.28rem/1.1 var(--f-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.solved { font: 500 0.8rem/1.35 var(--f-body); padding: 8px 10px; border-radius: 8px; background: var(--soft); color: var(--muted); }
+.solved[data-state="yes"] { color: var(--good); }
+
+.qbars { display: grid; gap: 7px; }
+.qbar { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr) 4.2rem; gap: 8px; align-items: center; font-size: 0.82rem; }
+.qbar .name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qbar .track { display: block; height: 10px; background: var(--soft); border-radius: 5px; overflow: hidden; }
+.qbar .fill { display: block; height: 100%; width: 0; background: var(--muted); border-radius: 5px; transition: width 120ms linear; }
+.qbar.best .fill { background: var(--accent); }
+.qbar.best .name { color: var(--ink); font-weight: 600; }
+.qbar .val { font: 500 0.8rem/1 var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.hint { font-size: 0.8rem; color: var(--muted); }
+
+details.hp summary { cursor: pointer; font: 600 0.9rem/1.2 var(--f-body); list-style: none; display: flex; justify-content: space-between; }
+details.hp summary::after { content: "+"; font-family: var(--f-mono); color: var(--muted); }
+details.hp[open] summary::after { content: "−"; }
+.hpgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; margin-top: 12px; }
+.hpgrid label { display: grid; gap: 4px; font: 500 0.72rem/1.2 var(--f-mono); color: var(--muted); min-width: 0; }
+.hpgrid input, .hpgrid select {
+  font: 500 0.88rem/1 var(--f-mono); color: var(--ink); background: var(--soft);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; width: 100%; min-width: 0;
+}
+.hpgrid .full { grid-column: 1 / -1; }
+.hpnote { font-size: 0.78rem; color: var(--muted); margin-top: 10px; }
+
+.chartpanel { padding: 16px; display: grid; gap: 10px; }
+.chartpanel canvas { width: 100%; height: 240px; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.8rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend b { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.notes .panel { padding: 16px; display: grid; gap: 8px; align-content: start; }
+.notes p, .notes li { color: var(--muted); font-size: 0.9rem; }
+.notes ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+code, kbd { font-family: var(--f-mono); font-size: 0.86em; background: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--ink); }
+.loadrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.loadrow .btn { flex: 1 1 140px; font-size: 0.84rem; padding: 9px 10px; }
+.msg { font-size: 0.8rem; color: var(--muted); min-height: 1.2em; }
+.msg[data-kind="ok"] { color: var(--good); }
+.msg[data-kind="err"] { color: var(--bad); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .qbar .fill { transition: none; } }
+@media (max-width: 480px) {
+  .qbar { grid-template-columns: 6.6rem minmax(0, 1fr) 3.8rem; }
+  .stats dd { font-size: 1.1rem; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="title">
+      <span class="eyebrow">rl_games · edición mejorada</span>
+      <h1>Laboratorio Lunar RL</h1>
+      <p class="lede">Un agente aprende a controlar el sistema a partir de la recompensa, en vivo y en tu navegador. Elige entorno y algoritmo, pulsa <b>Entrenar</b> y observa cómo sube la curva.</p>
+    </div>
+    <div class="pickers">
+      <div class="picker"><span id="lbl-env">Entorno</span>
+        <div class="seg" role="group" aria-labelledby="lbl-env">
+          <button type="button" id="env-cartpole" data-env="cartpole" aria-pressed="true">CartPole</button>
+          <button type="button" id="env-lunar" data-env="lunar" aria-pressed="false">Lunar Lander</button>
+        </div>
+      </div>
+      <div class="picker"><span id="lbl-algo">Algoritmo</span>
+        <div class="seg" role="group" aria-labelledby="lbl-algo">
+          <button type="button" id="algo-dqn" data-algo="dqn" aria-pressed="true">DQN</button>
+          <button type="button" id="algo-q" data-algo="qlearning" aria-pressed="false">Q-Learning</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="console">
+    <div class="panel stage">
+      <canvas id="sim" width="900" height="600" aria-label="Simulación del entorno"></canvas>
+      <dl class="telemetry" id="telemetry"></dl>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <div class="row">
+          <h2>Control de vuelo</h2>
+          <span class="status" id="status" data-mode="idle"><i></i><span id="status-text">En espera</span></span>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="button" id="btn-train">Entrenar</button>
+          <button class="btn" type="button" id="btn-watch">Ver política</button>
+          <button class="btn" type="button" id="btn-manual">Pilotear yo</button>
+          <button class="btn" type="button" id="btn-reset">Reiniciar agente</button>
+          <button class="btn" type="button" id="btn-step">Un paso</button>
+        </div>
+        <div class="picker"><span id="lbl-speed">Velocidad de entrenamiento</span>
+          <div class="seg" role="group" aria-labelledby="lbl-speed">
+            <button type="button" id="spd-1" data-speed="1" aria-pressed="false">Tiempo real</button>
+            <button type="button" id="spd-10" data-speed="10" aria-pressed="true">×10</button>
+            <button type="button" id="spd-max" data-speed="max" aria-pressed="false">Turbo</button>
+          </div>
+        </div>
+        <p class="hint" id="keys-hint">Pilotear yo: <kbd>←</kbd> <kbd>→</kbd> empujan el carro.</p>
+      </div>
+
+      <div class="panel">
+        <h2>Aprendizaje</h2>
+        <dl class="stats">
+          <div><dt>Episodio</dt><dd id="st-ep">0</dd></div>
+          <div><dt>Pasos</dt><dd id="st-steps">0</dd></div>
+          <div><dt>ε exploración</dt><dd id="st-eps">1.000</dd></div>
+          <div><dt>Último retorno</dt><dd id="st-last">–</dd></div>
+          <div><dt>Media 100</dt><dd id="st-avg">–</dd></div>
+          <div><dt id="st-extra-l">Pérdida</dt><dd id="st-extra">–</dd></div>
+        </dl>
+        <p class="solved" id="solved">Meta: media de 475 en 100 episodios.</p>
+      </div>
+
+      <div class="panel">
+        <div class="row"><h2>Q(s, a) ahora</h2><span class="hint">acción elegida en azul</span></div>
+        <div class="qbars" id="qbars"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel chartpanel">
+    <div class="row">
+      <h2>Curva de aprendizaje</h2>
+      <div class="legend">
+        <span><b style="background: var(--muted); opacity: .5"></b>Retorno por episodio</span>
+        <span><b style="background: var(--accent)"></b>Media móvil 50</span>
+        <span><b style="background: var(--good)"></b>Meta</span>
+      </div>
+    </div>
+    <canvas id="chart" aria-label="Retorno por episodio"></canvas>
+  </section>
+
+  <section class="notes">
+    <div class="panel">
+      <details class="hp" id="hp-details" open>
+        <summary>Hiperparámetros</summary>
+        <div class="hpgrid" id="hpgrid"></div>
+        <p class="hpnote">Al cambiar un valor se reinicia el agente con la nueva configuración. Los valores iniciales son los mismos presets del paquete Python.</p>
+      </details>
+    </div>
+    <div class="panel">
+      <h3>Modelo entrenado en Python</h3>
+      <p>El CartPole de esta página reproduce la física exacta de Gymnasium, así que una DQN entrenada con <code>rlgames</code> funciona aquí sin cambios.</p>
+      <p><code>rlgames train dqn --env CartPole-v1 --eval-every 20</code><br><code>rlgames export dqn --env CartPole-v1 --best</code></p>
+      <div class="loadrow">
+        <button class="btn" type="button" id="btn-pretrained">Cargar modelo incluido</button>
+        <label class="btn" for="file-model">Cargar archivo JSON</label>
+        <input class="visually-hidden" type="file" id="file-model" accept="application/json,.json">
+      </div>
+      <p class="msg" id="model-msg" role="status"></p>
+    </div>
+    <div class="panel">
+      <h3>Qué estás viendo</h3>
+      <ul>
+        <li><b>DQN</b>: red neuronal Q(s,·) con buffer de repetición, red objetivo, Double DQN, pérdida Huber y recorte de gradiente, escrita en JavaScript puro.</li>
+        <li><b>Q-Learning</b>: tabla indexada por el estado discretizado en intervalos.</li>
+        <li><b>Terminado ≠ truncado</b>: al agotar el tiempo el agente sigue estimando el futuro; solo un choque o un aterrizaje lo anulan.</li>
+        <li><b>Lunar Lander</b> es una versión ligera con la misma observación y recompensa que Gymnasium, pero con física simplificada en lugar de Box2D.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════════
+   Laboratorio Lunar RL -- environments + agents in plain JavaScript.
+   Mirrors src/rl_games (same presets, same update rules).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// ── seeded RNG (mulberry32) ─────────────────────────────────────────────
+function makeRng(seed) {
+  let a = seed >>> 0;
+  const next = () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return {
+    random: next,
+    uniform: (lo, hi) => lo + (hi - lo) * next(),
+    int: (n) => Math.floor(next() * n),
+  };
+}
+
+// ═══ Environment: CartPole-v1 (exact port of gymnasium/envs/classic_control/cartpole.py)
+class CartPole {
+  static id = "CartPole-v1";
+  static obsDim = 4;
+  static nActions = 2;
+  static actionNames = ["Empujar izquierda", "Empujar derecha"];
+  static obsLabels = ["x carro", "v carro", "θ poste", "ω poste"];
+  static maxSteps = 500;
+  static solved = 475;
+  constructor(rng) {
+    this.rng = rng;
+    this.g = 9.8; this.mc = 1.0; this.mp = 0.1; this.total = 1.1;
+    this.len = 0.5; this.pml = 0.05; this.force = 10.0; this.tau = 0.02;
+    this.thetaMax = 12 * 2 * Math.PI / 360; this.xMax = 2.4;
+    this.reset();
+  }
+  reset() {
+    this.s = [0, 0, 0, 0].map(() => this.rng.uniform(-0.05, 0.05));
+    this.t = 0; this.lastAction = null;
+    return this.s.slice();
+  }
+  step(action) {
+    let [x, xd, th, thd] = this.s;
+    const f = action === 1 ? this.force : -this.force;
+    const c = Math.cos(th), sn = Math.sin(th);
+    const temp = (f + this.pml * thd * thd * sn) / this.total;
+    const thacc = (this.g * sn - c * temp) / (this.len * (4 / 3 - this.mp * c * c / this.total));
+    const xacc = temp - this.pml * thacc * c / this.total;
+    x += this.tau * xd; xd += this.tau * xacc; th += this.tau * thd; thd += this.tau * thacc;
+    this.s = [x, xd, th, thd];
+    this.t += 1; this.lastAction = action;
+    const terminated = x < -this.xMax || x > this.xMax || th < -this.thetaMax || th > this.thetaMax;
+    const truncated = !terminated && this.t >= CartPole.maxSteps;
+    this.outcome = terminated ? "El poste cayó" : truncated ? "¡500 pasos en equilibrio!" : null;
+    return { obs: this.s.slice(), reward: 1.0, terminated, truncated };
+  }
+  manualAction(keys) {
+    if (keys.has("ArrowLeft")) return 0;
+    if (keys.has("ArrowRight")) return 1;
+    return this.t % 2; // no key: alternate so the net force is zero
+  }
+  draw(ctx, w, h, col) {
+    const sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, col.skyTop); sky.addColorStop(1, col.skyBottom);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+    const scale = w / 5.6, cx = w / 2, trackY = h * 0.72;
+    const X = (x) => cx + x * scale;
+    ctx.strokeStyle = col.groundEdge; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(X(-2.8), trackY); ctx.lineTo(X(2.8), trackY); ctx.stroke();
+    ctx.fillStyle = col.bad;
+    for (const lim of [-2.4, 2.4]) ctx.fillRect(X(lim) - 1.5, trackY - 14, 3, 28);
+    const [x, , th] = this.s;
+    const cw = 0.5 * scale, ch = 0.3 * scale, cartX = X(x), cartY = trackY - ch / 2 - 4;
+    ctx.fillStyle = col.craft;
+    roundRect(ctx, cartX - cw / 2, cartY - ch / 2, cw, ch, 6); ctx.fill();
+    const L = 1.0 * scale;
+    ctx.strokeStyle = col.warm; ctx.lineWidth = Math.max(6, scale * 0.09); ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(cartX, cartY - ch * 0.2);
+    ctx.lineTo(cartX + L * Math.sin(th), cartY - ch * 0.2 - L * Math.cos(th)); ctx.stroke();
+    ctx.fillStyle = col.accent;
+    ctx.beginPath(); ctx.arc(cartX, cartY - ch * 0.2, scale * 0.05, 0, Math.PI * 2); ctx.fill();
+    if (this.lastAction !== null) {
+      const dir = this.lastAction === 1 ? 1 : -1;
+      ctx.strokeStyle = col.accent; ctx.lineWidth = 3;
+      const ax = cartX - dir * (cw / 2 + 8), ay = cartY;
+      ctx.beginPath(); ctx.moveTo(ax - dir * 26, ay); ctx.lineTo(ax, ay);
+      ctx.lineTo(ax - dir * 9, ay - 7); ctx.moveTo(ax, ay); ctx.lineTo(ax - dir * 9, ay + 7); ctx.stroke();
+    }
+  }
+}
+
+// ═══ Environment: Lunar Lander (lite). Same observation layout and reward
+//     shaping as gymnasium LunarLander-v3; simplified rigid-body physics.
+class LunarLite {
+  static id = "LunarLander-lite";
+  static obsDim = 8;
+  static nActions = 4;
+  static actionNames = ["No hacer nada", "Motor izq. (gira ↺)", "Motor principal", "Motor der. (gira ↻)"];
+  static obsLabels = ["x", "y", "vx", "vy", "ángulo", "ω", "pata izq.", "pata der."];
+  static maxSteps = 1000;
+  static solved = 200;
+  constructor(rng) {
+    this.rng = rng;
+    this.W = 20; this.H = 400 / 30; this.FPS = 50; this.dt = 1 / 50; this.g = -10;
+    this.padY = this.H / 4; this.legRest = 0.95;
+    this.hull = [[-14, 17], [-17, 0], [-17, -10], [17, -10], [17, 0], [14, 17]].map(([a, b]) => [a / 30, b / 30]);
+    this.legs = [[-0.75, -0.95], [0.75, -0.95]];
+    this.particles = [];
+    this.reset();
+  }
+  reset() {
+    const n = 11, W = this.W, H = this.H;
+    const raw = Array.from({ length: n }, () => this.rng.uniform(0, H / 2));
+    for (let i = n / 2 - 2 | 0; i <= (n / 2 | 0) + 2; i++) raw[i] = this.padY;
+    this.cx = Array.from({ length: n }, (_, i) => (W / (n - 1)) * i);
+    this.cy = raw.map((v, i) => (i >= (n / 2 | 0) - 2 && i <= (n / 2 | 0) + 2) ? this.padY
+      : (raw[Math.max(0, i - 1)] + v + raw[Math.min(n - 1, i + 1)]) / 3);
+    this.padX1 = this.cx[(n / 2 | 0) - 1]; this.padX2 = this.cx[(n / 2 | 0) + 1];
+    this.x = W / 2; this.y = H - 1.2; this.vx = this.rng.uniform(-2.5, 2.5); this.vy = this.rng.uniform(-2, 0);
+    this.a = 0; this.w = 0; this.contact = [0, 0];
+    this.t = 0; this.prevShaping = null; this.lastAction = 0; this.particles = []; this.outcome = null;
+    return this.obs();
+  }
+  ground(x) {
+    const cx = this.cx, cy = this.cy;
+    if (x <= cx[0]) return cy[0];
+    for (let i = 1; i < cx.length; i++) {
+      if (x <= cx[i]) { const f = (x - cx[i - 1]) / (cx[i] - cx[i - 1]); return cy[i - 1] + f * (cy[i] - cy[i - 1]); }
+    }
+    return cy[cy.length - 1];
+  }
+  toWorld([px, py]) {
+    const c = Math.cos(this.a), s = Math.sin(this.a);
+    return [this.x + px * c - py * s, this.y + px * s + py * c];
+  }
+  obs() {
+    const { W, H, FPS } = this;
+    return [
+      (this.x - W / 2) / (W / 2),
+      (this.y - (this.padY + this.legRest)) / (H / 2),
+      this.vx * (W / 2) / FPS,
+      this.vy * (H / 2) / FPS,
+      this.a,
+      20 * this.w / FPS,
+      this.contact[0], this.contact[1],
+    ];
+  }
+  step(action) {
+    const dt = this.dt, c = Math.cos(this.a), s = Math.sin(this.a);
+    let ax = 0, ay = this.g, alpha = 0, mPower = 0, sPower = 0;
+    if (action === 2) {
+      mPower = 1;
+      const thrust = 20 + this.rng.uniform(-0.8, 0.8);
+      ax += -s * thrust; ay += c * thrust;
+      this.emit(0, -0.4, -s, c, 1);
+    } else if (action === 1 || action === 3) {
+      sPower = 1;
+      // Side engines sit slightly below the centre of mass: the left one (action 1)
+      // pushes the craft right and turns it counter-clockwise (angle grows),
+      // the same sign convention as gymnasium's heuristic controller.
+      const dir = action === 1 ? 1 : -1;
+      ax += dir * c * 2.2; ay += dir * s * 2.2;
+      alpha = dir * (3.0 + this.rng.uniform(-0.2, 0.2));
+      this.emit(-dir * 0.55, -0.1, -dir * c, -dir * s, 0.4);
+    }
+    this.vx += ax * dt; this.vy += ay * dt; this.w += alpha * dt;
+    this.x += this.vx * dt; this.y += this.vy * dt; this.a += this.w * dt;
+
+    // ground contact on the leg tips
+    let crashed = false;
+    const tips = this.legs.map((p) => this.toWorld(p));
+    const pen = tips.map(([lx, ly]) => this.ground(lx) - ly);
+    this.contact = pen.map((p) => (p >= -0.02 ? 1 : 0));
+    const maxPen = Math.max(pen[0], pen[1]);
+    if (maxPen > 0) {
+      this.y += maxPen;
+      if (this.vy < -5) crashed = true; // hard landing
+      if (this.vy < 0) this.vy = 0;
+      this.vx *= 0.85;
+      this.w *= 0.85;
+      if (this.contact[0] && !this.contact[1]) this.w -= 5 * dt;
+      else if (this.contact[1] && !this.contact[0]) this.w += 5 * dt;
+      else { this.a *= 0.9; this.w *= 0.5; }
+    }
+    // hull touching the ground = crash
+    for (const p of this.hull) { const [hx, hy] = this.toWorld(p); if (hy < this.ground(hx) - 0.02) crashed = true; }
+
+    const o = this.obs();
+    const shaping = -100 * Math.hypot(o[0], o[1]) - 100 * Math.hypot(o[2], o[3]) - 100 * Math.abs(o[4])
+      + 10 * o[6] + 10 * o[7];
+    let reward = this.prevShaping === null ? 0 : shaping - this.prevShaping;
+    this.prevShaping = shaping;
+    reward -= mPower * 0.3 + sPower * 0.03;
+
+    let terminated = false;
+    this.outcome = null;
+    if (crashed || Math.abs(o[0]) >= 1 || this.y > this.H * 1.6) {
+      terminated = true; reward = -100; this.outcome = "Choque";
+    } else if (this.contact[0] && this.contact[1] && Math.abs(this.vx) < 0.05 && Math.abs(this.w) < 0.05 && action !== 2) {
+      terminated = true; reward = 100; this.outcome = "¡Aterrizaje!";
+    }
+    this.t += 1; this.lastAction = action;
+    const truncated = !terminated && this.t >= LunarLite.maxSteps;
+    if (truncated) this.outcome = "Tiempo agotado";
+    return { obs: o, reward, terminated, truncated };
+  }
+  emit(px, py, dx, dy, power) {
+    if (this.particles.length > 120) this.particles.splice(0, 20);
+    const [wx, wy] = this.toWorld([px, py]);
+    for (let i = 0; i < 3; i++) {
+      this.particles.push({ x: wx, y: wy, vx: -dx * (3 + this.rng.random() * 3) * power + this.vx, vy: -dy * (3 + this.rng.random() * 3) * power + this.vy, life: 1 });
+    }
+  }
+  manualAction(keys) {
+    if (keys.has("ArrowUp") || keys.has(" ")) return 2;
+    if (keys.has("ArrowLeft")) return 1;
+    if (keys.has("ArrowRight")) return 3;
+    return 0;
+  }
+  draw(ctx, w, h, col) {
+    const k = w / this.W;
+    const X = (x) => x * k, Y = (y) => h - y * k;
+    const sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, col.skyTop); sky.addColorStop(1, col.skyBottom);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+    // stars (fixed pattern)
+    ctx.fillStyle = col.muted; ctx.globalAlpha = 0.35;
+    for (let i = 0; i < 40; i++) { const sx = (i * 97.13) % w, sy = (i * 53.7) % (h * 0.6); ctx.fillRect(sx, sy, 1.6, 1.6); }
+    ctx.globalAlpha = 1;
+    // terrain
+    ctx.fillStyle = col.ground; ctx.strokeStyle = col.groundEdge; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, h);
+    this.cx.forEach((x, i) => ctx.lineTo(X(x), Y(this.cy[i])));
+    ctx.lineTo(w, h); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // flags
+    for (const fx of [this.padX1, this.padX2]) {
+      ctx.strokeStyle = col.muted; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(X(fx), Y(this.padY)); ctx.lineTo(X(fx), Y(this.padY + 1.3)); ctx.stroke();
+      ctx.fillStyle = col.warm;
+      ctx.beginPath(); ctx.moveTo(X(fx), Y(this.padY + 1.3)); ctx.lineTo(X(fx) + 16, Y(this.padY + 1.15)); ctx.lineTo(X(fx), Y(this.padY + 1.0)); ctx.fill();
+    }
+    // particles
+    for (const p of this.particles) {
+      p.x += p.vx * this.dt; p.y += p.vy * this.dt; p.life -= 0.06;
+    }
+    this.particles = this.particles.filter((p) => p.life > 0);
+    for (const p of this.particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = col.warm;
+      ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), 2 + 3 * p.life, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // legs
+    ctx.strokeStyle = col.craft; ctx.lineWidth = 3;
+    this.legs.forEach((lp, i) => {
+      const [ax, ay] = this.toWorld([lp[0] * 0.55, -0.2]);
+      const [bx, by] = this.toWorld(lp);
+      ctx.strokeStyle = this.contact[i] ? col.good : col.craft;
+      ctx.beginPath(); ctx.moveTo(X(ax), Y(ay)); ctx.lineTo(X(bx), Y(by)); ctx.stroke();
+    });
+    // hull
+    ctx.fillStyle = col.craft;
+    ctx.beginPath();
+    this.hull.forEach((p, i) => { const [hx, hy] = this.toWorld(p); i ? ctx.lineTo(X(hx), Y(hy)) : ctx.moveTo(X(hx), Y(hy)); });
+    ctx.closePath(); ctx.fill();
+    const [wx, wy] = this.toWorld([0, 0.2]);
+    ctx.fillStyle = col.accent; ctx.beginPath(); ctx.arc(X(wx), Y(wy), k * 0.14, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+const ENVS = { cartpole: CartPole, lunar: LunarLite };
+
+// Observation bounds for tabular Q-learning (same as src/rl_games/envs.py).
+const OBS_BOUNDS = {
+  cartpole: { bounds: [[-2.4, 2.4], [-3, 3], [-0.21, 0.21], [-3, 3]], binary: 0 },
+  lunar: { bounds: [[-1.5, 1.5], [-0.5, 1.5], [-5, 5], [-5, 5], [-3.14, 3.14], [-5, 5]], binary: 2 },
+};
+
+// Presets = the Python presets (src/rl_games/config.py), scaled for the browser.
+const PRESETS = {
+  dqn: {
+    cartpole: { lr: 1e-3, gamma: 0.99, hidden: "64,64", batch: 64, buffer: 50000, learningStarts: 1000, trainFreq: 1, targetUpdate: 500, epsDecaySteps: 10000, epsEnd: 0.05, doubleDqn: true, seed: 1 },
+    lunar: { lr: 5e-4, gamma: 0.99, hidden: "128,128", batch: 64, buffer: 100000, learningStarts: 5000, trainFreq: 4, targetUpdate: 1000, epsDecaySteps: 60000, epsEnd: 0.05, doubleDqn: true, seed: 1 },
+  },
+  qlearning: {
+    cartpole: { lr: 0.1, gamma: 0.99, bins: 10, epsDecay: 0.998, epsEnd: 0.01, seed: 1 },
+    lunar: { lr: 0.1, gamma: 0.99, bins: 8, epsDecay: 0.9995, epsEnd: 0.01, seed: 1 },
+  },
+};
+
+const HP_FIELDS = {
+  dqn: [
+    ["lr", "Tasa de aprendizaje", "number", 0.0001],
+    ["gamma", "γ descuento", "number", 0.001],
+    ["hidden", "Capas ocultas", "text"],
+    ["batch", "Tamaño de lote", "number", 1],
+    ["learningStarts", "Pasos de calentamiento", "number", 100],
+    ["trainFreq", "Actualizar cada N pasos", "number", 1],
+    ["targetUpdate", "Sincronizar red objetivo", "number", 50],
+    ["epsDecaySteps", "Pasos de decaimiento de ε", "number", 1000],
+    ["epsEnd", "ε final", "number", 0.01],
+    ["seed", "Semilla", "number", 1],
+    ["doubleDqn", "Double DQN", "bool"],
+  ],
+  qlearning: [
+    ["lr", "Tasa de aprendizaje α", "number", 0.01],
+    ["gamma", "γ descuento", "number", 0.001],
+    ["bins", "Intervalos por dimensión", "number", 1],
+    ["epsDecay", "Decaimiento de ε por episodio", "number", 0.0001],
+    ["epsEnd", "ε final", "number", 0.01],
+    ["seed", "Semilla", "number", 1],
+  ],
+};
+
+// ═══ Neural network: MLP with ReLU, Adam, Huber loss, gradient clipping
+class MLP {
+  constructor(sizes, rng) {
+    this.sizes = sizes;
+    this.L = sizes.length - 1;
+    this.W = []; this.b = [];
+    for (let l = 0; l < this.L; l++) {
+      const nin = sizes[l], nout = sizes[l + 1], bound = 1 / Math.sqrt(nin); // PyTorch nn.Linear default
+      const W = new Float32Array(nin * nout), b = new Float32Array(nout);
+      for (let i = 0; i < W.length; i++) W[i] = rng ? rng.uniform(-bound, bound) : 0;
+      for (let i = 0; i < b.length; i++) b[i] = rng ? rng.uniform(-bound, bound) : 0;
+      this.W.push(W); this.b.push(b);
+    }
+    this.acts = sizes.map((n) => new Float32Array(n));
+    this.deltas = sizes.map((n) => new Float32Array(n));
+  }
+  forward(x) { // returns internal buffer: copy if you need to keep it
+    const a0 = this.acts[0];
+    for (let i = 0; i < a0.length; i++) a0[i] = x[i];
+    for (let l = 0; l < this.L; l++) {
+      const inp = this.acts[l], out = this.acts[l + 1], W = this.W[l], b = this.b[l];
+      const nin = inp.length, nout = out.length, last = l === this.L - 1;
+      for (let o = 0; o < nout; o++) {
+        let z = b[o]; const row = o * nin;
+        for (let i = 0; i < nin; i++) z += W[row + i] * inp[i];
+        out[o] = last ? z : (z > 0 ? z : 0);
+      }
+    }
+    return this.acts[this.L];
+  }
+  copyFrom(other) {
+    for (let l = 0; l < this.L; l++) { this.W[l].set(other.W[l]); this.b[l].set(other.b[l]); }
+  }
+  toJSON() {
+    return this.W.map((W, l) => {
+      const nin = this.sizes[l], nout = this.sizes[l + 1];
+      return { W: Array.from({ length: nout }, (_, o) => Array.from(W.subarray(o * nin, (o + 1) * nin))), b: Array.from(this.b[l]) };
+    });
+  }
+  static fromLayers(layers) {
+    const sizes = [layers[0].W[0].length, ...layers.map((ly) => ly.b.length)];
+    const net = new MLP(sizes, null);
+    layers.forEach((ly, l) => { net.W[l].set(ly.W.flat()); net.b[l].set(ly.b); });
+    return net;
+  }
+}
+
+class Adam {
+  constructor(net, lr) {
+    this.net = net; this.lr = lr; this.t = 0; this.b1 = 0.9; this.b2 = 0.999; this.eps = 1e-8;
+    const z = (arrs) => arrs.map((a) => new Float32Array(a.length));
+    this.gW = z(net.W); this.gb = z(net.b);
+    this.mW = z(net.W); this.vW = z(net.W); this.mb = z(net.b); this.vb = z(net.b);
+  }
+  zero() { this.gW.forEach((g) => g.fill(0)); this.gb.forEach((g) => g.fill(0)); }
+  // Backprop dLoss/dOutput (already in net.deltas[L]) for the current forward pass.
+  backward() {
+    const net = this.net;
+    for (let l = net.L - 1; l >= 0; l--) {
+      const d = net.deltas[l + 1], inp = net.acts[l], W = net.W[l], gW = this.gW[l], gb = this.gb[l];
+      const nin = inp.length, nout = d.length;
+      for (let o = 0; o < nout; o++) {
+        const dv = d[o]; if (dv === 0) continue;
+        gb[o] += dv; const row = o * nin;
+        for (let i = 0; i < nin; i++) gW[row + i] += dv * inp[i];
+      }
+      if (l > 0) {
+        const dprev = net.deltas[l];
+        for (let i = 0; i < nin; i++) {
+          if (inp[i] <= 0) { dprev[i] = 0; continue; } // ReLU derivative
+          let s = 0; for (let o = 0; o < nout; o++) s += W[o * nin + i] * d[o];
+          dprev[i] = s;
+        }
+      }
+    }
+  }
+  step(maxNorm) {
+    let sq = 0;
+    for (const g of [...this.gW, ...this.gb]) for (let i = 0; i < g.length; i++) sq += g[i] * g[i];
+    const norm = Math.sqrt(sq), scale = norm > maxNorm ? maxNorm / (norm + 1e-6) : 1;
+    this.t += 1;
+    const bc1 = 1 - Math.pow(this.b1, this.t), bc2 = 1 - Math.pow(this.b2, this.t);
+    const upd = (p, g, m, v) => {
+      for (let i = 0; i < p.length; i++) {
+        const gi = g[i] * scale;
+        m[i] = this.b1 * m[i] + (1 - this.b1) * gi;
+        v[i] = this.b2 * v[i] + (1 - this.b2) * gi * gi;
+        p[i] -= this.lr * (m[i] / bc1) / (Math.sqrt(v[i] / bc2) + this.eps);
+      }
+    };
+    for (let l = 0; l < this.net.L; l++) {
+      upd(this.net.W[l], this.gW[l], this.mW[l], this.vW[l]);
+      upd(this.net.b[l], this.gb[l], this.mb[l], this.vb[l]);
+    }
+  }
+}
+
+// ═══ Agents ═════════════════════════════════════════════════════════════
+class DQNAgent {
+  constructor(Env, hp) {
+    this.Env = Env; this.hp = hp; this.rng = makeRng(hp.seed * 7919 + 17);
+    const hidden = String(hp.hidden).split(",").map((v) => parseInt(v, 10)).filter((v) => v > 0);
+    this.hidden = hidden.length ? hidden : [64, 64];
+    this.online = new MLP([Env.obsDim, ...this.hidden, Env.nActions], this.rng);
+    this.target = new MLP([Env.obsDim, ...this.hidden, Env.nActions], null);
+    this.target.copyFrom(this.online);
+    this.opt = new Adam(this.online, hp.lr);
+    const cap = hp.buffer, d = Env.obsDim;
+    this.buf = { s: new Float32Array(cap * d), s2: new Float32Array(cap * d), a: new Int8Array(cap), r: new Float32Array(cap), term: new Uint8Array(cap), pos: 0, size: 0, cap };
+    this.epsilon = 1; this.steps = 0; this.episodes = 0; this.lastLoss = NaN;
+    this.q = new Float32Array(Env.nActions);
+  }
+  qValues(obs) { this.q.set(this.online.forward(obs)); return this.q; }
+  act(obs, greedy) {
+    if (!greedy && this.rng.random() < this.epsilon) return this.rng.int(this.Env.nActions);
+    return argmax(this.qValues(obs));
+  }
+  observe(s, a, r, s2, terminated) {
+    const B = this.buf, d = this.Env.obsDim, i = B.pos;
+    B.s.set(s, i * d); B.s2.set(s2, i * d); B.a[i] = a; B.r[i] = r; B.term[i] = terminated ? 1 : 0;
+    B.pos = (B.pos + 1) % B.cap; B.size = Math.min(B.size + 1, B.cap);
+    this.steps += 1;
+    const hp = this.hp;
+    let loss = null;
+    if (B.size >= Math.max(hp.learningStarts, hp.batch) && this.steps % hp.trainFreq === 0) loss = this.learn();
+    const frac = Math.min(1, this.steps / hp.epsDecaySteps);
+    this.epsilon = 1 + frac * (hp.epsEnd - 1);
+    if (this.steps % hp.targetUpdate === 0) this.target.copyFrom(this.online);
+    return loss;
+  }
+  learn() {
+    const B = this.buf, d = this.Env.obsDim, n = this.hp.batch, gamma = this.hp.gamma;
+    const nA = this.Env.nActions, net = this.online, L = net.L;
+    this.opt.zero();
+    let lossSum = 0;
+    for (let k = 0; k < n; k++) {
+      const j = this.rng.int(B.size);
+      const s2 = B.s2.subarray(j * d, j * d + d);
+      let y = B.r[j];
+      if (!B.term[j]) {
+        let aStar;
+        if (this.hp.doubleDqn) aStar = argmax(net.forward(s2)); // online selects
+        const qt = this.target.forward(s2);
+        if (!this.hp.doubleDqn) aStar = argmax(qt);
+        y += gamma * qt[aStar]; // target evaluates
+      }
+      const q = net.forward(B.s.subarray(j * d, j * d + d));
+      const a = B.a[j], diff = q[a] - y, ad = Math.abs(diff);
+      lossSum += ad < 1 ? 0.5 * diff * diff : ad - 0.5; // Huber (SmoothL1, beta = 1)
+      const dOut = net.deltas[L];
+      for (let o = 0; o < nA; o++) dOut[o] = 0;
+      dOut[a] = (ad < 1 ? diff : Math.sign(diff)) / n;
+      this.opt.backward();
+    }
+    this.opt.step(10);
+    this.lastLoss = lossSum / n;
+    return this.lastLoss;
+  }
+  episodeEnd() { this.episodes += 1; }
+  extraLabel() { return "Pérdida"; }
+  extraValue() { return Number.isFinite(this.lastLoss) ? this.lastLoss.toFixed(4) : "calentando"; }
+  loadLayers(layers) {
+    const net = MLP.fromLayers(layers);
+    if (net.sizes[0] !== this.Env.obsDim || net.sizes[net.L] !== this.Env.nActions) {
+      throw new Error(`El modelo espera ${net.sizes[0]} entradas y ${net.sizes[net.L]} acciones; este entorno usa ${this.Env.obsDim} y ${this.Env.nActions}.`);
+    }
+    this.online = net; this.target = MLP.fromLayers(layers); this.opt = new Adam(this.online, this.hp.lr);
+    this.hidden = net.sizes.slice(1, -1); this.epsilon = this.hp.epsEnd;
+    this.steps = Math.max(this.steps, this.hp.epsDecaySteps);
+  }
+}
+
+class QLearningAgent {
+  constructor(Env, hp, envKey) {
+    this.Env = Env; this.hp = hp; this.rng = makeRng(hp.seed * 104729 + 3);
+    const spec = OBS_BOUNDS[envKey];
+    this.bounds = spec.bounds; this.nBinary = spec.binary;
+    this.edges = this.bounds.map(([lo, hi]) => {
+      const e = []; for (let i = 1; i < hp.bins; i++) e.push(lo + (hi - lo) * i / hp.bins); return e;
+    });
+    this.table = new Map();
+    this.epsilon = 1; this.steps = 0; this.episodes = 0; this.lastTd = NaN;
+    this.q = new Float32Array(Env.nActions);
+  }
+  key(obs) {
+    const parts = [];
+    for (let i = 0; i < this.bounds.length; i++) {
+      const [lo, hi] = this.bounds[i]; const v = Math.min(hi, Math.max(lo, obs[i]));
+      let b = 0; for (const e of this.edges[i]) if (v >= e) b++; parts.push(b);
+    }
+    for (let i = this.bounds.length; i < obs.length; i++) parts.push(Math.round(obs[i]));
+    return parts.join(",");
+  }
+  row(k) { let r = this.table.get(k); if (!r) { r = new Float64Array(this.Env.nActions); this.table.set(k, r); } return r; }
+  qValues(obs) { const r = this.table.get(this.key(obs)); this.q.set(r || new Float64Array(this.Env.nActions)); return this.q; }
+  act(obs, greedy) {
+    if (!greedy && this.rng.random() < this.epsilon) return this.rng.int(this.Env.nActions);
+    const r = this.row(this.key(obs)); const m = Math.max(...r);
+    const best = []; r.forEach((v, i) => { if (v === m) best.push(i); });
+    return best.length === 1 ? best[0] : best[this.rng.int(best.length)]; // random tie-break
+  }
+  observe(s, a, r, s2, terminated) {
+    this.steps += 1;
+    const q = this.row(this.key(s)), q2 = this.row(this.key(s2));
+    const target = r + (terminated ? 0 : this.hp.gamma * Math.max(...q2));
+    const td = target - q[a];
+    q[a] += this.hp.lr * td;
+    this.lastTd = td * td;
+    return this.lastTd;
+  }
+  episodeEnd() { this.episodes += 1; this.epsilon = Math.max(this.hp.epsEnd, this.epsilon * this.hp.epsDecay); }
+  extraLabel() { return "Estados visitados"; }
+  extraValue() { return this.table.size.toLocaleString("es-CO"); }
+}
+
+function argmax(arr) { let b = 0; for (let i = 1; i < arr.length; i++) if (arr[i] > arr[b]) b = i; return b; }
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ═══ App state ═════════════════════════════════════════════════════════
+const $ = (id) => document.getElementById(id);
+const app = {
+  envKey: "cartpole", algo: "dqn", speed: "10", mode: "idle",
+  hp: null, env: null, agent: null, obs: null, epReturn: 0, returns: [],
+  keys: new Set(), banner: null, bannerUntil: 0,
+};
+
+function colors() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = (n) => cs.getPropertyValue(n).trim();
+  return { skyTop: g("--sky-top"), skyBottom: g("--sky-bottom"), ground: g("--ground"), groundEdge: g("--ground-edge"),
+    craft: g("--craft"), accent: g("--accent"), warm: g("--warm"), good: g("--good"), bad: g("--bad"),
+    muted: g("--muted"), ink: g("--ink"), line: g("--line"), panel: g("--panel") };
+}
+let COL = colors();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { COL = colors(); drawChart(); });
+new MutationObserver(() => { COL = colors(); drawChart(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+function buildAgent() {
+  const Env = ENVS[app.envKey];
+  app.env = new Env(makeRng(app.hp.seed * 31 + 7));
+  app.agent = app.algo === "dqn" ? new DQNAgent(Env, app.hp) : new QLearningAgent(Env, app.hp, app.envKey);
+  app.obs = app.env.reset(); app.epReturn = 0; app.returns = [];
+  buildQBars(); buildTelemetry(); renderStats(); drawChart();
+  const goal = Env.solved;
+  $("solved").textContent = `Meta: media de ${goal} en los últimos 100 episodios.`;
+  $("solved").dataset.state = "no";
+  $("keys-hint").innerHTML = app.envKey === "cartpole"
+    ? "Pilotear yo: <kbd>←</kbd> <kbd>→</kbd> empujan el carro."
+    : "Pilotear yo: <kbd>↑</kbd> motor principal, <kbd>←</kbd> <kbd>→</kbd> motores laterales.";
+  $("btn-pretrained").disabled = !(app.envKey === "cartpole" && app.algo === "dqn");
+  $("model-msg").textContent = app.envKey === "cartpole" && app.algo === "dqn" ? "" : "Disponible con CartPole + DQN.";
+  $("model-msg").dataset.kind = "";
+}
+
+function resetHp() {
+  app.hp = { ...PRESETS[app.algo][app.envKey] };
+  buildHpForm();
+  buildAgent();
+}
+
+function buildHpForm() {
+  const grid = $("hpgrid"); grid.textContent = "";
+  for (const [key, label, type, step] of HP_FIELDS[app.algo]) {
+    const lab = document.createElement("label");
+    lab.htmlFor = `hp-${key}`; lab.textContent = label;
+    let input;
+    if (type === "bool") {
+      input = document.createElement("select");
+      input.innerHTML = '<option value="true">Sí</option><option value="false">No</option>';
+      input.value = String(app.hp[key]);
+    } else {
+      input = document.createElement("input");
+      input.type = type; input.value = app.hp[key];
+      if (step) input.step = step;
+      if (type === "number") input.min = 0;
+    }
+    input.id = `hp-${key}`;
+    input.addEventListener("change", () => {
+      let v = input.value;
+      if (type === "number") { v = Number(v); if (!Number.isFinite(v) || v < 0) { input.value = app.hp[key]; return; } }
+      if (type === "bool") v = v === "true";
+      app.hp[key] = v;
+      setMode("idle"); buildAgent();
+    });
+    lab.appendChild(input); grid.appendChild(lab);
+  }
+}
+
+function buildQBars() {
+  const box = $("qbars"); box.textContent = "";
+  ENVS[app.envKey].actionNames.forEach((name, i) => {
+    const row = document.createElement("div"); row.className = "qbar"; row.id = `q-${i}`;
+    row.innerHTML = `<span class="name" title="${name}">${name}</span><span class="track"><span class="fill"></span></span><span class="val">0.00</span>`;
+    box.appendChild(row);
+  });
+}
+function renderQ(q, chosen) {
+  const n = q.length; let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) { lo = Math.min(lo, q[i]); hi = Math.max(hi, q[i]); }
+  const span = hi - lo || 1;
+  for (let i = 0; i < n; i++) {
+    const row = $(`q-${i}`); if (!row) continue;
+    row.classList.toggle("best", i === chosen);
+    row.querySelector(".fill").style.width = `${8 + 92 * (q[i] - lo) / span}%`;
+    row.querySelector(".val").textContent = q[i].toFixed(2);
+  }
+}
+
+function buildTelemetry() {
+  const dl = $("telemetry"); dl.textContent = "";
+  ENVS[app.envKey].obsLabels.forEach((lab, i) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<dt>s[${i}] ${lab}</dt><dd id="obs-${i}">0.000</dd>`;
+    dl.appendChild(d);
+  });
+}
+function renderTelemetry() {
+  app.obs.forEach((v, i) => { const el = $(`obs-${i}`); if (el) el.textContent = (v >= 0 ? " " : "") + v.toFixed(3); });
+}
+
+function mean(a) { return a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN; }
+function renderStats() {
+  const ag = app.agent, last = app.returns[app.returns.length - 1];
+  $("st-ep").textContent = ag.episodes.toLocaleString("es-CO");
+  $("st-steps").textContent = ag.steps.toLocaleString("es-CO");
+  $("st-eps").textContent = ag.epsilon.toFixed(3);
+  $("st-last").textContent = last === undefined ? "–" : last.toFixed(1);
+  const avg = mean(app.returns.slice(-100));
+  $("st-avg").textContent = Number.isFinite(avg) ? avg.toFixed(1) : "–";
+  $("st-extra-l").textContent = ag.extraLabel();
+  $("st-extra").textContent = ag.extraValue();
+  const goal = ENVS[app.envKey].solved;
+  if (app.returns.length >= 100 && avg >= goal) {
+    $("solved").textContent = `Resuelto: media de ${avg.toFixed(1)} en los últimos 100 episodios (meta ${goal}).`;
+    $("solved").dataset.state = "yes";
+  }
+}
+
+// ── simulation step ───────────────────────────────────────────────────
+function envStep(learn, greedy) {
+  const env = app.env, ag = app.agent, s = app.obs;
+  const action = app.mode === "manual" ? env.manualAction(app.keys) : ag.act(s, greedy);
+  const { obs, reward, terminated, truncated } = env.step(action);
+  if (learn) ag.observe(s, action, reward, obs, terminated); // truncated is NOT terminal
+  app.obs = obs; app.epReturn += reward; app.lastAction = action;
+  if (terminated || truncated) {
+    if (learn) { ag.episodeEnd(); app.returns.push(app.epReturn); }
+    app.banner = `${env.outcome || "Fin"} · retorno ${app.epReturn.toFixed(1)}`;
+    app.bannerUntil = performance.now() + (app.mode === "train" && app.speed !== "1" ? 400 : 1400);
+    app.obs = env.reset(); app.epReturn = 0;
+    return true;
+  }
+  return false;
+}
+
+let chartDirty = false;
+function frame(now) {
+  const m = app.mode;
+  if (m === "train") {
+    const budgetEnd = now + 12;
+    if (app.speed === "max") {
+      let n = 0; while (performance.now() < budgetEnd && n < 20000) { if (envStep(true, false)) chartDirty = true; n++; }
+    } else {
+      const n = Number(app.speed);
+      for (let i = 0; i < n; i++) if (envStep(true, false)) chartDirty = true;
+    }
+  } else if (m === "watch" || m === "manual") {
+    envStep(false, true);
+  }
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+let lastStats = 0;
+function render(now) {
+  const cv = $("sim"), ctx = cv.getContext("2d");
+  // Match the backing store to the displayed size so text stays crisp at any width.
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 900, h = w * 2 / 3;
+  if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  app.env.draw(ctx, w, h, COL);
+  // HUD
+  const fs = Math.max(11, Math.round(w / 48));
+  ctx.font = `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
+  ctx.fillStyle = COL.ink; ctx.textBaseline = "top";
+  const pad = Math.max(10, w / 40);
+  ctx.fillText(`${ENVS[app.envKey].id} · ${app.algo === "dqn" ? "DQN" : "Q-Learning"}`, pad, pad);
+  ctx.fillStyle = COL.muted;
+  ctx.fillText(`paso ${app.env.t}   retorno ${app.epReturn.toFixed(1)}`, pad, pad + fs * 1.4);
+  if (app.banner && now < app.bannerUntil) {
+    ctx.font = `600 ${Math.max(18, Math.round(w / 24))}px "Saira Condensed", sans-serif`;
+    ctx.textAlign = "center"; ctx.fillStyle = COL.ink;
+    ctx.fillText(app.banner, w / 2, h * 0.12);
+    ctx.textAlign = "left";
+  }
+  if (now - lastStats > 90) {
+    lastStats = now;
+    renderTelemetry(); renderStats();
+    const q = app.agent.qValues(app.obs);
+    renderQ(q, app.mode === "manual" ? app.lastAction : argmax(q));
+    if (chartDirty) { drawChart(); chartDirty = false; }
+  }
+}
+
+// ── learning curve ────────────────────────────────────────────────────
+function drawChart() {
+  const cv = $("chart"); if (!cv) return;
+  const dpr = window.devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight;
+  if (cv.width !== Math.round(cw * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  const data = app.returns, goal = ENVS[app.envKey].solved;
+  const padL = 46, padR = 12, padT = 10, padB = 26;
+  const W = cw - padL - padR, H = ch - padT - padB;
+  let lo = app.envKey === "cartpole" ? 0 : Math.max(-500, Math.min(-200, ...data)), hi = app.envKey === "cartpole" ? 500 : Math.max(goal + 50, ...data);
+  const step = niceStep((hi - lo) / 5); lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const n = Math.max(data.length, 10);
+  const X = (i) => padL + (i / (n - 1 || 1)) * W, Y = (v) => padT + H - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * H;
+  ctx.font = `500 11px "IBM Plex Mono", monospace`; ctx.textBaseline = "middle"; ctx.textAlign = "right";
+  for (let v = lo; v <= hi + 1e-9; v += step) {
+    ctx.strokeStyle = COL.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(padL, Y(v)); ctx.lineTo(padL + W, Y(v)); ctx.stroke();
+    ctx.fillStyle = COL.muted; ctx.fillText(String(Math.round(v)), padL - 6, Y(v));
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const xs = niceStep(n / 6);
+  for (let i = 0; i <= n; i += xs) { if (i === 0) continue; ctx.fillText(String(i), X(i - 1), padT + H + 8); }
+  ctx.setLineDash([5, 4]); ctx.strokeStyle = COL.good; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(padL, Y(goal)); ctx.lineTo(padL + W, Y(goal)); ctx.stroke(); ctx.setLineDash([]);
+  if (!data.length) {
+    ctx.fillStyle = COL.muted; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `500 13px "IBM Plex Sans", sans-serif`;
+    ctx.fillText(W < 420 ? "Pulsa Entrenar para ver la curva." : "Pulsa Entrenar: cada episodio terminado aparece aquí.", padL + W / 2, padT + H / 2);
+    return;
+  }
+  ctx.fillStyle = COL.muted; ctx.globalAlpha = 0.45;
+  const r = data.length > 800 ? 1 : 1.8;
+  data.forEach((v, i) => { ctx.beginPath(); ctx.arc(X(i), Y(v), r, 0, Math.PI * 2); ctx.fill(); });
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = COL.accent; ctx.lineWidth = 2.2; ctx.beginPath();
+  let s = 0; const win = 50;
+  data.forEach((v, i) => { s += v; if (i >= win) s -= data[i - win]; const m = s / Math.min(i + 1, win); i ? ctx.lineTo(X(i), Y(m)) : ctx.moveTo(X(i), Y(m)); });
+  ctx.stroke();
+  const lastI = data.length - 1; let tail = 0; for (let i = Math.max(0, lastI - win + 1); i <= lastI; i++) tail += data[i];
+  ctx.fillStyle = COL.accent; ctx.beginPath(); ctx.arc(X(lastI), Y(tail / Math.min(data.length, win)), 4, 0, Math.PI * 2); ctx.fill();
+}
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9)))), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+// ── controls ──────────────────────────────────────────────────────────
+const MODE_TEXT = { idle: "En espera", train: "Entrenando", watch: "Política codiciosa", manual: "Piloto manual" };
+function setMode(m) {
+  app.mode = m;
+  $("status").dataset.mode = m; $("status-text").textContent = MODE_TEXT[m];
+  $("btn-train").textContent = m === "train" ? "Pausar" : "Entrenar";
+  $("btn-watch").setAttribute("aria-pressed", String(m === "watch"));
+  $("btn-manual").setAttribute("aria-pressed", String(m === "manual"));
+  if (m !== "train") { app.obs = app.env.reset(); app.epReturn = 0; }
+}
+function segSelect(_unused, attr, value) {
+  document.querySelectorAll(`[${attr}]`).forEach((b) => b.setAttribute("aria-pressed", String(b.getAttribute(attr) === value)));
+}
+document.querySelectorAll("[data-env]").forEach((b) => b.addEventListener("click", () => {
+  app.envKey = b.dataset.env; segSelect(null, "data-env", app.envKey); setModeQuiet(); resetHp();
+}));
+document.querySelectorAll("[data-algo]").forEach((b) => b.addEventListener("click", () => {
+  app.algo = b.dataset.algo; segSelect(null, "data-algo", app.algo); setModeQuiet(); resetHp();
+}));
+document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => {
+  app.speed = b.dataset.speed; segSelect(null, "data-speed", app.speed);
+}));
+function setModeQuiet() { app.mode = "idle"; $("status").dataset.mode = "idle"; $("status-text").textContent = MODE_TEXT.idle; $("btn-train").textContent = "Entrenar"; $("btn-watch").setAttribute("aria-pressed", "false"); $("btn-manual").setAttribute("aria-pressed", "false"); }
+$("btn-train").addEventListener("click", () => {
+  if (app.mode === "train") { setMode("idle"); return; }
+  if (app.mode !== "idle") { app.obs = app.env.reset(); app.epReturn = 0; }
+  app.mode = "train"; setModeLabelsOnly("train");
+});
+function setModeLabelsOnly(m) {
+  $("status").dataset.mode = m; $("status-text").textContent = MODE_TEXT[m];
+  $("btn-train").textContent = m === "train" ? "Pausar" : "Entrenar";
+  $("btn-watch").setAttribute("aria-pressed", String(m === "watch"));
+  $("btn-manual").setAttribute("aria-pressed", String(m === "manual"));
+}
+$("btn-watch").addEventListener("click", () => setMode(app.mode === "watch" ? "idle" : "watch"));
+$("btn-manual").addEventListener("click", () => { setMode(app.mode === "manual" ? "idle" : "manual"); $("sim").focus?.(); });
+$("btn-reset").addEventListener("click", () => { setModeQuiet(); buildAgent(); });
+$("btn-step").addEventListener("click", () => {
+  if (app.mode !== "idle") setMode("idle");
+  const prev = app.mode; app.mode = "train"; envStep(true, false); app.mode = prev; chartDirty = true;
+});
+const GAME_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", " "]);
+window.addEventListener("keydown", (e) => {
+  if (app.mode !== "manual" || !GAME_KEYS.has(e.key)) return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "SELECT") return;
+  e.preventDefault(); app.keys.add(e.key);
+});
+window.addEventListener("keyup", (e) => app.keys.delete(e.key));
+window.addEventListener("blur", () => app.keys.clear());
+window.addEventListener("resize", () => drawChart());
+
+// ── Python-trained model ──────────────────────────────────────────────
+function applyModel(spec, source) {
+  const msg = $("model-msg");
+  try {
+    if (!spec || spec.format !== "rl_games-dqn-mlp" || !Array.isArray(spec.layers)) throw new Error("El archivo no es un modelo exportado con 'rlgames export'.");
+    if (spec.env_id && spec.env_id !== "CartPole-v1") throw new Error(`Modelo de ${spec.env_id}; este simulador solo reproduce exactamente CartPole-v1.`);
+    if (app.envKey !== "cartpole" || app.algo !== "dqn") { app.envKey = "cartpole"; app.algo = "dqn"; segSelect(null, "data-env", "cartpole"); segSelect(null, "data-algo", "dqn"); resetHp(); }
+    app.agent.loadLayers(spec.layers);
+    setMode("watch");
+    msg.dataset.kind = "ok";
+    msg.textContent = `${source}: red ${app.agent.online.sizes.join("→")}, ${spec.training_episodes ?? "?"} episodios en Python. Mostrando su política.`;
+  } catch (err) {
+    msg.dataset.kind = "err"; msg.textContent = err.message;
+  }
+}
+$("btn-pretrained").addEventListener("click", async () => {
+  const msg = $("model-msg"); msg.dataset.kind = ""; msg.textContent = "Cargando…";
+  try {
+    const res = await fetch("models/dqn_CartPole-v1.json");
+    if (!res.ok) throw new Error(`No se encontró models/dqn_CartPole-v1.json (HTTP ${res.status}).`);
+    applyModel(await res.json(), "Modelo incluido");
+  } catch (err) { msg.dataset.kind = "err"; msg.textContent = err.message; }
+});
+$("file-model").addEventListener("change", async (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  try { applyModel(JSON.parse(await f.text()), f.name); }
+  catch (err) { $("model-msg").dataset.kind = "err"; $("model-msg").textContent = "JSON inválido: " + err.message; }
+  e.target.value = "";
+});
+
+// ── boot ──────────────────────────────────────────────────────────────
+resetHp();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

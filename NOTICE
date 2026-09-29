@@ -1,0 +1,10 @@
+rl_games (edición mejorada)
+
+Este proyecto es un espejo mejorado de emiliomunozai/rl_games
+(https://github.com/emiliomunozai/rl_games), distribuido bajo la licencia
+Apache 2.0. El historial de commits original se conserva en este repositorio.
+
+Cambios de esta edición: implementación de referencia de los algoritmos,
+correcciones (terminated/truncated, guardado de la DQN, carga segura),
+configuración validada, semillas, métricas, pruebas, CI y un simulador
+HTML5 que entrena en el navegador. Ver REVISION.md y CHANGELOG.md.

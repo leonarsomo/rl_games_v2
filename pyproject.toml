@@ -4,21 +4,90 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rl_games"
-version = "0.1.0"
-description = "RL Games: a collection of reinforcement learning games."
+version = "0.2.0"
+description = "Laboratorio de aprendizaje por refuerzo: Q-Learning tabular y DQN sobre Gymnasium, con simulación HTML5."
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.11 , <3.12"
-
+authors = [
+    { name = "emiliomunozai (proyecto original)" },
+    { name = "Leonar Socarrás Molina", email = "leonarsomo@unisabana.edu.co" },
+]
+requires-python = ">=3.11,<3.12"
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Education",
+]
 dependencies = [
     "gymnasium[box2d]>=1.2.3",
     "numpy>=2.4.2",
-    "ruff>=0.15.5",
     "torch>=2.10.0",
 ]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.9"]
 
 [project.scripts]
 rlgames = "rl_games.cli:main"
 
+[dependency-groups]
+dev = [
+    "mypy>=1.15",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.15.5",
+]
+
+# ── PyTorch: use the CPU-only wheels on Linux/Windows ────────────────────
+# The default Linux wheel pulls ~6 GB of CUDA libraries that a CartPole or
+# LunarLander DQN never needs. macOS wheels are CPU/MPS-only already.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/rl_games"]
+
+# ── Tooling ──────────────────────────────────────────────────────────────
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle + pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "SIM",           # simplify
+    "NPY",           # numpy-specific rules
+    "RUF",           # ruff-specific
+    "PT",            # pytest style
+]
+ignore = ["RUF001", "RUF002", "RUF003"]  # allow Spanish/Greek characters (ε, γ, á…)
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore:builtin type .* has no __module__:DeprecationWarning"]
+markers = ["slow: end-to-end training checks (deselect with -m 'not slow')"]
+
+[tool.coverage.run]
+source = ["rl_games"]

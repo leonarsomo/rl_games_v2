@@ -212,3 +212,9 @@ __marimo__/
 
 # Exercise solutions -- local only, never committed
 CHEATSHEET.md
+
+# Local artefacts of this edition
+*.png
+!docs/**/*.png
+.coverage
+*.whl
