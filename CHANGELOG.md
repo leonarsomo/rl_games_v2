@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 · edición mejorada (2026-09-28)
+## 0.2.0 · rl_games v2, edición mejorada (2026-09-28)
 
 ### Añadido
 - Implementación de referencia de Q-Learning tabular y DQN.

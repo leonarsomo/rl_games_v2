@@ -1,7 +1,7 @@
-# rl_games · edición mejorada
+# rl_games v2 · edición mejorada
 
-[![CI](https://github.com/leonarsomo/rl_games_mejorado/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leonarsomo/rl_games_mejorado/actions/workflows/ci.yml)
-[![Simulador](https://img.shields.io/badge/simulador-HTML5-2a57d6)](https://leonarsomo.github.io/rl_games_mejorado/)
+[![CI](https://github.com/leonarsomo/rl_games_v2/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leonarsomo/rl_games_v2/actions/workflows/ci.yml)
+[![Simulador](https://img.shields.io/badge/simulador-HTML5-2a57d6)](https://leonarsomo.github.io/rl_games_v2/)
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
 ![Licencia Apache 2.0](https://img.shields.io/badge/licencia-Apache%202.0-lightgrey)
 
@@ -13,7 +13,7 @@ Es un espejo mejorado de [emiliomunozai/rl_games](https://github.com/emiliomunoz
 
 ## Simulador en el navegador
 
-**[leonarsomo.github.io/rl_games_mejorado](https://leonarsomo.github.io/rl_games_mejorado/)** (o abre `docs/index.html` localmente).
+**[leonarsomo.github.io/rl_games_v2](https://leonarsomo.github.io/rl_games_v2/)** (o abre `docs/index.html` localmente).
 
 - **CartPole-v1** es un puerto exacto de la física de Gymnasium: la diferencia máxima entre ambas trayectorias es de 1e-7, la precisión de float32. Por eso una DQN entrenada en Python funciona en la página sin cambios; el modelo incluido obtiene 500/500 en ambos lados.
 - **Lunar Lander** es una versión ligera con la misma observación de 8 valores y la misma recompensa que `LunarLander-v3`, pero con física de cuerpo rígido simplificada en lugar de Box2D. El controlador heurístico oficial de Gymnasium, trasladado sin cambios, aterriza en 20 de 20 intentos.
@@ -26,8 +26,8 @@ Es un espejo mejorado de [emiliomunozai/rl_games](https://github.com/emiliomunoz
 Requiere [uv](https://docs.astral.sh/uv/) y Python 3.11.
 
 ```bash
-git clone https://github.com/leonarsomo/rl_games_mejorado.git
-cd rl_games_mejorado
+git clone https://github.com/leonarsomo/rl_games_v2.git
+cd rl_games_v2
 uv sync --all-extras        # dependencias + matplotlib para las gráficas
 source .venv/bin/activate   # macOS / Linux  (Windows: .venv\Scripts\activate)
 ```
