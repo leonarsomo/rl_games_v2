@@ -3,7 +3,7 @@ name: Deploy simulator to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ["docs/**"]
+    paths: ["docs/**", "src/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -23,9 +23,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Assemble site (simulator + Python sources for the code viewer)
+        run: |
+          mkdir -p _site
+          cp -r docs/. _site/
+          mkdir -p _site/src
+          cp -r src/rl_games _site/src/
+          find _site -name "__pycache__" -type d -prune -exec rm -rf {} +
+          touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

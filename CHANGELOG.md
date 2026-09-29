@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 (2026-09-28)
+
+### Añadido
+- Visor de código junto al simulador: JavaScript en ejecución y su equivalente en Python, con las funciones activas resaltadas en vivo y enlaces a las líneas en GitHub.
+- El JavaScript del simulador se separa en módulos (`docs/js/`).
+- GitHub Pages publica también `src/rl_games` para el visor.
+
 ## 0.2.0 · rl_games v2, edición mejorada (2026-09-28)
 
 ### Añadido

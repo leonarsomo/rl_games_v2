@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rl_games"
-version = "0.2.0"
+version = "0.2.1"
 description = "Laboratorio de aprendizaje por refuerzo: Q-Learning tabular y DQN sobre Gymnasium, con simulación HTML5."
 readme = "README.md"
 license = { text = "Apache-2.0" }

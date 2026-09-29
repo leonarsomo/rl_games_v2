@@ -13,13 +13,20 @@ Es un espejo mejorado de [emiliomunozai/rl_games](https://github.com/emiliomunoz
 
 ## Simulador en el navegador
 
-**[leonarsomo.github.io/rl_games_v2](https://leonarsomo.github.io/rl_games_v2/)** (o abre `docs/index.html` localmente).
+**[leonarsomo.github.io/rl_games_v2](https://leonarsomo.github.io/rl_games_v2/)**
+
+Para abrirlo en local sirve la carpeta raíz del repositorio (el visor necesita leer `src/`):
+
+```bash
+python -m http.server 8000   # y abre http://localhost:8000/docs/
+```
 
 - **CartPole-v1** es un puerto exacto de la física de Gymnasium: la diferencia máxima entre ambas trayectorias es de 1e-7, la precisión de float32. Por eso una DQN entrenada en Python funciona en la página sin cambios; el modelo incluido obtiene 500/500 en ambos lados.
 - **Lunar Lander** es una versión ligera con la misma observación de 8 valores y la misma recompensa que `LunarLander-v3`, pero con física de cuerpo rígido simplificada en lugar de Box2D. El controlador heurístico oficial de Gymnasium, trasladado sin cambios, aterriza en 20 de 20 intentos.
 - DQN (Double DQN, Huber, recorte de gradiente, red objetivo) y Q-Learning escritos en JavaScript puro, sin dependencias.
 - Modos: entrenar (tiempo real, ×10 o turbo), ver la política codiciosa y pilotear con el teclado.
 - Muestra en vivo la curva de aprendizaje, los valores Q(s,a) del estado actual y el vector de observación.
+- **Código al lado de la simulación.** Un visor muestra el JavaScript que se está ejecutando (`agents.js`, `nn.js`, `envs.js`, `app.js`) y su equivalente en el paquete Python (`dqn.py`, `qlearning.py`, `base.py`, `replay.py`, `config.py`). Las funciones activas se resaltan en vivo: al entrenar una DQN se marcan `observe`, `learn`, `MLP.forward` y `Adam.step`; en Python, `_observe`, `_learn` y `ReplayBuffer.sample`. Cada archivo enlaza a sus líneas en GitHub.
 
 ## Instalación
 
@@ -96,6 +103,13 @@ src/rl_games/
     └── replay.py     # buffer de repetición con arreglos NumPy
 docs/
 ├── index.html        # simulador HTML5 (GitHub Pages)
+├── js/
+│   ├── envs.js       # CartPole exacto y Lunar Lander ligero
+│   ├── nn.js         # MLP y Adam desde cero
+│   ├── agents.js     # DQN y Q-Learning
+│   ├── presets.js    # hiperparámetros (espejo de config.py)
+│   ├── app.js        # bucle de simulación e interfaz
+│   └── codeview.js   # visor de código con resaltado en vivo
 └── models/           # modelo DQN de CartPole exportado desde Python
 tests/                # pytest: unidades, CLI y pruebas de aprendizaje
 ```
@@ -133,7 +147,7 @@ uv run pytest                 # todas (≈ 35 s)
 uv run pytest -m "not slow"   # solo unidades (≈ 3 s)
 ```
 
-La CI de GitHub Actions ejecuta lint, formato, tipos y pruebas en Ubuntu y macOS, y el flujo `pages.yml` publica `docs/` en GitHub Pages.
+La CI de GitHub Actions ejecuta lint, formato, tipos y pruebas en Ubuntu y macOS, y el flujo `pages.yml` publica en GitHub Pages el simulador junto con una copia de `src/rl_games` para el visor de código.
 
 ## Créditos y licencia
 
